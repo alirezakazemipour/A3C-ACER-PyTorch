@@ -25,7 +25,8 @@ if __name__ == "__main__":
     print(f"Env: {env_name}\n"
           f"n_states: {n_states}\n"
           f"n_actions: {n_actions}\n"
-          f"n_workers: {n_workers}")
+          f"n_workers: {n_workers}\n"
+          f"action_bounds: {actions_bounds}")
 
     global_actor = Actor(n_states, n_actions, actions_bounds)
     global_actor.share_memory()
@@ -36,7 +37,7 @@ if __name__ == "__main__":
     shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
     shared_actor_opt.share_memory()
 
-    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr)
+    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr*10)
     shared_critic_opt.share_memory()
 
     workers = [Worker(id=i,

@@ -3,7 +3,7 @@ import gym
 import numpy as np
 import torch
 from torch import from_numpy
-
+import sys
 
 class Worker:
     def __init__(self,
@@ -37,13 +37,17 @@ class Worker:
         self.shared_actor_optimizer = shared_actor_optimizer
         self.shared_critic_optimizer = shared_critic_optimizer
 
+        self.mse_loss = torch.nn.MSELoss()
+
     def get_action(self, state):
         state = np.expand_dims(state, 0)
         state = from_numpy(state).float()
         with torch.no_grad():
             dist = self.local_actor(state)
             action = dist.sample()
-        return action.numpy()
+        action = np.clip(action.numpy(), self.action_bounds[0], self.action_bounds[1])
+        # print(action)
+        return action
 
     def get_value(self, state):
         state = np.expand_dims(state, 0)
@@ -60,15 +64,15 @@ class Worker:
     def share_grads_to_global_models(local_model, global_model):
         for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
             if global_param.grad is not None:
+                # print(global_param.grad)
                 return
+            # print("here2")
             global_param._grad = local_param.grad
 
     def step(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
         while True:
-            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-            self.shared_critic_optimizer.zero_grad()
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, next_states = [], [], [], [], []
@@ -77,7 +81,8 @@ class Worker:
             episode_reward = 0
             while not done:
                 action = self.get_action(state)
-                next_state, reward, done, _ = self.env.step(action)
+                # print(action[0])
+                next_state, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
                 states.append(state)
                 actions.append(action)
@@ -87,12 +92,14 @@ class Worker:
                 episode_reward += reward
 
             R = 0
+            returns = []
             for r in reversed(rewards):
                 R = r + self.gamma * R
+                returns.insert(0, R)
 
             states = torch.Tensor(states).view(-1, self.n_states)
             actions = torch.Tensor(actions).view(-1, 1)
-            returns = torch.Tensor(R).view(-1, 1)
+            returns = torch.Tensor(returns).view(-1, 1)
 
             dist = self.local_actor(states)
             log_probs = dist.log_prob(actions)
@@ -101,9 +108,13 @@ class Worker:
             advs = returns - values
 
             pg_loss = -(log_probs * advs.detach()).mean()
-            value_loss = (advs ** 2).mean()
+            value_loss = self.mse_loss(values, returns)
 
             actor_loss = pg_loss - self.ent_coeff * dist.entropy().mean()
+
+            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+            self.shared_critic_optimizer.zero_grad()
+
             actor_loss.backward()
             value_loss.backward()
 
@@ -113,5 +124,6 @@ class Worker:
             self.shared_actor_optimizer.step()
             self.shared_critic_optimizer.step()
 
-            running_reward = 0.9 * running_reward + 0.1 * episode_reward[0]
+            running_reward = 0.9 * running_reward + 0.1 * episode_reward
             print(f"Worker {self.id}: {running_reward:.0f}")
+            # print(loss)

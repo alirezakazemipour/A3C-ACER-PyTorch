@@ -32,7 +32,7 @@ class Actor(nn.Module, ABC):
         sigma = F.softplus(self.sigma(x))
 
         mu = mu * self.action_bounds[1]
-        mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])
+        # mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])
 
         return Normal(mu, sigma)
 
