@@ -22,7 +22,7 @@ class Actor(nn.Module, ABC):
         self.hidden.bias.data.zero_()
         nn.init.xavier_uniform_(self.mu.weight)
         self.mu.bias.data.zero_()
-        nn.init.kaiming_normal_(self.sigma.weight, nonlinearity="softplus")
+        nn.init.kaiming_normal_(self.sigma.weight, nonlinearity="relu")
         self.sigma.bias.data.zero_()
 
     def forward(self, inputs):
@@ -31,8 +31,8 @@ class Actor(nn.Module, ABC):
         mu = torch.tanh(self.mu(x))
         sigma = F.softplus(self.sigma(x))
 
-        mu *= self.action_bounds[1]
-        mu.clamp_(self.action_bounds[0], self.action_bounds[1])
+        mu = mu * self.action_bounds[1]
+        mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])
 
         return Normal(mu, sigma)
 

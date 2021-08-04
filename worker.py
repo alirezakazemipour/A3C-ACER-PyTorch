@@ -64,6 +64,8 @@ class Worker:
             global_param._grad = local_param.grad
 
     def step(self):
+        print(f"Worker: {self.id} started.")
+        running_reward = 0
         while True:
             self.shared_actor_optimizer.zero_grad()  # Reset global gradients
             self.shared_critic_optimizer.zero_grad()
@@ -72,22 +74,25 @@ class Worker:
             states, actions, rewards, dones, next_states = [], [], [], [], []
             state = self.env.reset()
             done = False
+            episode_reward = 0
             while not done:
                 action = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action)
+                # self.env.render()
                 states.append(state)
                 actions.append(action)
-                rewards.append(reward)
+                rewards.append(reward / 8 + 1)
                 dones.append(dones)
                 next_states.append(next_state)
+                episode_reward += reward
 
             R = 0
             for r in reversed(rewards):
                 R = r + self.gamma * R
 
-            states = torch.cat(states).view(-1, self.n_states)
-            actions = torch.cat(actions)
-            returns = torch.cat(R).view(-1, 1)
+            states = torch.Tensor(states).view(-1, self.n_states)
+            actions = torch.Tensor(actions).view(-1, 1)
+            returns = torch.Tensor(R).view(-1, 1)
 
             dist = self.local_actor(states)
             log_probs = dist.log_prob(actions)
@@ -107,3 +112,6 @@ class Worker:
 
             self.shared_actor_optimizer.step()
             self.shared_critic_optimizer.step()
+
+            running_reward = 0.9 * running_reward + 0.1 * episode_reward[0]
+            print(f"Worker {self.id}: {running_reward:.0f}")
