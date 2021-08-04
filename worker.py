@@ -6,17 +6,20 @@ from torch import from_numpy
 
 
 class Worker:
-    def __init__(self, n_states,
+    def __init__(self,
+                 id,
+                 n_states,
                  n_actions,
                  action_bounds,
                  env_name,
                  n_hiddens,
                  global_actor,
                  global_critic,
-                 global_actor_optimizer,
-                 global_critic_optimizer,
+                 shared_actor_optimizer,
+                 shared_critic_optimizer,
                  gamma,
                  ent_coeff):
+        self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
         self.action_bounds = action_bounds
@@ -31,8 +34,8 @@ class Worker:
 
         self.global_actor = global_actor
         self.global_critic = global_critic
-        self.global_actor_optimizer = global_actor_optimizer
-        self.global_critic_optimizer = global_critic_optimizer
+        self.shared_actor_optimizer = shared_actor_optimizer
+        self.shared_critic_optimizer = shared_critic_optimizer
 
     def get_action(self, state):
         state = np.expand_dims(state, 0)
@@ -62,8 +65,8 @@ class Worker:
 
     def step(self):
         while True:
-            self.global_actor_optimizer.zero_grad()  # Reset global gradients
-            self.global_critic_optimizer.zero_grad()
+            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+            self.shared_critic_optimizer.zero_grad()
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, next_states = [], [], [], [], []
@@ -102,5 +105,5 @@ class Worker:
             self.share_grads_to_global_models(self.local_actor, self.global_actor)
             self.share_grads_to_global_models(self.local_critic, self.global_critic)
 
-            self.global_actor_optimizer.step()
-            self.global_critic_optimizer.step()
+            self.shared_actor_optimizer.step()
+            self.shared_critic_optimizer.step()
