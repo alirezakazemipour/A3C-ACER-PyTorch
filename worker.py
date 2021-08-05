@@ -5,6 +5,7 @@ import torch
 from torch import from_numpy
 import sys
 
+
 class Worker:
     def __init__(self,
                  id,
@@ -38,6 +39,7 @@ class Worker:
         self.shared_critic_optimizer = shared_critic_optimizer
 
         self.mse_loss = torch.nn.MSELoss()
+        self.time_steps = 1
 
     def get_action(self, state):
         state = np.expand_dims(state, 0)
@@ -46,7 +48,6 @@ class Worker:
             dist = self.local_actor(state)
             action = dist.sample()
         action = np.clip(action.numpy(), self.action_bounds[0], self.action_bounds[1])
-        # print(action)
         return action
 
     def get_value(self, state):
@@ -64,37 +65,41 @@ class Worker:
     def share_grads_to_global_models(local_model, global_model):
         for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
             if global_param.grad is not None:
-                # print(global_param.grad)
                 return
-            # print("here2")
             global_param._grad = local_param.grad
 
     def step(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
+        state = self.env.reset()
+        next_state = None
+        done = False
+        episode_reward = 0
         while True:
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, next_states = [], [], [], [], []
-            state = self.env.reset()
-            done = False
-            episode_reward = 0
-            while not done:
+
+            while not done and self.time_steps % 10 != 0:
+
                 action = self.get_action(state)
-                # print(action[0])
                 next_state, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
                 states.append(state)
                 actions.append(action)
-                rewards.append(reward / 8 + 1)
-                dones.append(dones)
+                rewards.append(reward)
+                dones.append(done)
                 next_states.append(next_state)
                 episode_reward += reward
+                self.time_steps += 1
+                state = next_state
 
-            R = 0
+            self.time_steps = 1
+
+            R = self.get_value(next_state)[0]
             returns = []
-            for r in reversed(rewards):
-                R = r + self.gamma * R
+            for r, d in zip(rewards[::-1], dones[::-1]):
+                R = r + self.gamma * R * (1 - d)
                 returns.insert(0, R)
 
             states = torch.Tensor(states).view(-1, self.n_states)
@@ -124,6 +129,10 @@ class Worker:
             self.shared_actor_optimizer.step()
             self.shared_critic_optimizer.step()
 
-            running_reward = 0.9 * running_reward + 0.1 * episode_reward
-            print(f"Worker {self.id}: {running_reward:.0f}")
-            # print(loss)
+            if done:
+                state = self.env.reset()
+                done = False
+
+                running_reward = 0.9 * running_reward + 0.1 * episode_reward
+                print(f"\nWorker {self.id}: {running_reward:.0f}")
+                episode_reward = 0

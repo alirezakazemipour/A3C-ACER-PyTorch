@@ -37,7 +37,7 @@ if __name__ == "__main__":
     shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
     shared_actor_opt.share_memory()
 
-    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr*10)
+    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr * 10)
     shared_critic_opt.share_memory()
 
     workers = [Worker(id=i,
