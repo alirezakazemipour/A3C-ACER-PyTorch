@@ -3,7 +3,6 @@ import gym
 import numpy as np
 import torch
 from torch import from_numpy
-import sys
 
 
 class Worker:
@@ -30,7 +29,7 @@ class Worker:
         self.env_name = env_name
         self.env = gym.make(self.env_name)
 
-        self.local_actor = Actor(self.n_states, self.n_actions, self.action_bounds, self.n_hiddens)
+        self.local_actor = Actor(self.n_states, self.n_actions, self.action_bounds, self.n_hiddens * 2)
         self.local_critic = Critic(self.n_states, self.n_hiddens)
 
         self.global_actor = global_actor
@@ -39,6 +38,7 @@ class Worker:
         self.shared_critic_optimizer = shared_critic_optimizer
 
         self.mse_loss = torch.nn.MSELoss()
+        self.ep = 0
 
     def get_action(self, state):
         state = np.expand_dims(state, 0)
@@ -74,6 +74,9 @@ class Worker:
         next_state = None
         episode_reward = 0
         while True:
+            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+            self.shared_critic_optimizer.zero_grad()
+
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones = [], [], [], []
@@ -92,12 +95,16 @@ class Worker:
 
                 if done:
                     state = self.env.reset()
-
-                    running_reward = 0.99 * running_reward + 0.01 * episode_reward
-                    print(f"\nWorker {self.id}: {running_reward:.0f}")
+                    self.ep += 1
+                    if self.ep == 1:
+                        running_reward = episode_reward
+                    else:
+                        running_reward = 0.99 * running_reward + 0.01 * episode_reward
+                    if self.id == 0:
+                        print(f"\nWorker {self.id}: {running_reward:.0f}")
                     episode_reward = 0
 
-                if step % 10 == 0:
+                if step % 10 == 0 or done:
                     break
 
             R = self.get_value(next_state)[0]
@@ -120,9 +127,6 @@ class Worker:
             value_loss = self.mse_loss(values, returns)
 
             actor_loss = pg_loss - self.ent_coeff * dist.entropy().mean()
-
-            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-            self.shared_critic_optimizer.zero_grad()
 
             actor_loss.backward()
             value_loss.backward()

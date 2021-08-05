@@ -7,7 +7,7 @@ from torch import multiprocessing as mp
 env_name = "Pendulum-v0"
 n_workers = 4
 lr = 1e-4
-gamma = 0.9
+gamma = 0.99
 ent_coeff = 0.01
 n_hiddens = 128
 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
           f"n_workers: {n_workers}\n"
           f"action_bounds: {actions_bounds}")
 
-    global_actor = Actor(n_states, n_actions, actions_bounds)
+    global_actor = Actor(n_states, n_actions, actions_bounds, n_hiddens * 2)
     global_actor.share_memory()
 
     global_critic = Critic(n_states)
