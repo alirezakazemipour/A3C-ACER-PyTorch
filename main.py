@@ -3,11 +3,12 @@ from model import Actor, Critic
 from shared_optimizer import SharedAdam
 from worker import Worker
 from torch import multiprocessing as mp
+import os
 
 env_name = "Pendulum-v0"
-n_workers = 4
+n_workers = os.cpu_count()
 lr = 1e-4
-gamma = 0.99
+gamma = 0.9
 ent_coeff = 0.01
 n_hiddens = 128
 

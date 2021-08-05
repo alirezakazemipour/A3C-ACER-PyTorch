@@ -30,7 +30,7 @@ class Worker:
         self.env = gym.make(self.env_name)
 
         self.local_actor = Actor(self.n_states, self.n_actions, self.action_bounds, self.n_hiddens * 2)
-        self.local_critic = Critic(self.n_states, self.n_hiddens)
+        self.local_critic = Critic(self.n_states)
 
         self.global_actor = global_actor
         self.global_critic = global_critic
@@ -87,7 +87,7 @@ class Worker:
 
                 states.append(state)
                 actions.append(action)
-                rewards.append(reward)
+                rewards.append((reward + 8.1) / 8.1)
                 dones.append(done)
 
                 episode_reward += reward
