@@ -21,7 +21,7 @@ class Model(nn.Module, ABC):
         conv2_out_w = self.conv_shape(conv1_out_w, 4, 2)
         conv2_out_h = self.conv_shape(conv1_out_h, 4, 2)
 
-        flatten_size = conv2_out_w * conv2_out_h * 64
+        flatten_size = conv2_out_w * conv2_out_h * 32
 
         self.fc = nn.Linear(in_features=flatten_size, out_features=256)
         self.value = nn.Linear(in_features=256, out_features=1)

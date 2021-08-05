@@ -39,7 +39,7 @@ class Worker:
         with torch.no_grad():
             dist, value = self.model(state)
             action = dist.sample()
-        return action.cpu().numpy(), value.cpu().numpy().squeeze()
+        return action.numpy(), value.numpy().squeeze()
 
     def sync_thread_spec_params(self):
         self.model.load_state_dict(self.global_model.state_dict())
@@ -65,20 +65,19 @@ class Worker:
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones = [], [], [], []
-            print("here")
 
             for step in range(1, 1 + self.env.spec.max_episode_steps):
                 action, _ = self.get_actions_and_values(state)
-                print(action)
                 next_obs, reward, done, _ = self.env.step(action)
-                self.env.render()
+                # self.env.render()
                 states.append(state)
                 actions.append(action)
                 rewards.append(np.sign(reward))
                 dones.append(done)
 
                 episode_reward += reward
-                state = make_state(state, next_obs, False)
+                next_state = make_state(state, next_obs, False)
+                state = next_state
 
                 if done:
                     obs = self.env.reset()
@@ -90,7 +89,7 @@ class Worker:
                     else:
                         running_reward = 0.9 * running_reward + 0.1 * episode_reward
 
-                    if self.id == 0 and self.ep % 20 == 0:
+                    if self.id == 0 and self.ep % 1 == 0:
                         print(f"\nWorker {self.id}: {running_reward:.0f}")
                     episode_reward = 0
 
@@ -103,21 +102,20 @@ class Worker:
                 R = r + self.gamma * R * (1 - d)
                 returns.insert(0, R)
 
-            states = torch.Tensor(states).view(-1, self.state_shape)
-            actions = torch.Tensor(actions).view(-1, 1)
+            states = torch.Tensor(states).view(-1, *self.state_shape)
+            actions = torch.Tensor(actions)
             returns = torch.Tensor(returns).view(-1, 1)
 
             dist, values = self.model(states)
-            log_probs = dist.log_prob(actions)
+            log_probs = dist.log_prob(actions.squeeze(1))
             advs = returns - values
 
-            pg_loss = -(log_probs * advs.detach()).mean()
+            pg_loss = -(log_probs * advs.squeeze(1).detach()).mean()
             value_loss = self.mse_loss(values, returns)
 
-            actor_loss = pg_loss - self.ent_coeff * dist.entropy().mean() + 0.5 * value_loss
+            total_loss = pg_loss - self.ent_coeff * dist.entropy().mean() + 0.5 * value_loss
 
-            actor_loss.backward()
-            value_loss.backward()
+            total_loss.backward()
 
             self.share_grads_to_global_models(self.model, self.global_model)
 
