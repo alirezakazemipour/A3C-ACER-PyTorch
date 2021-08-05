@@ -1,59 +1,57 @@
 from abc import ABC
-import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.distributions.normal import Normal
+from torch.distributions import Categorical
 
 
-class Actor(nn.Module, ABC):
-    def __init__(self, n_states, n_actions, action_bounds, n_hiddens=128):
-        super(Actor, self).__init__()
-        self.n_states = n_states
+class Model(nn.Module, ABC):
+
+    def __init__(self, state_shape, n_actions):
+        super(Model, self).__init__()
+        self.state_shape = state_shape
         self.n_actions = n_actions
-        self.n_hiddens = n_hiddens
-        assert action_bounds[0] == -action_bounds[1], "computation of bounds of the mu should change!"
-        self.action_bounds = action_bounds
 
-        self.hidden = nn.Linear(self.n_states, self.n_hiddens)
-        self.mu = nn.Linear(self.n_hiddens, self.n_actions)
-        self.sigma = nn.Linear(self.n_hiddens, self.n_actions)
+        c, w, h = state_shape
+        #  https://github.com/openai/baselines/blob/master/baselines/ppo1/cnn_policy.py
+        self.conv1 = nn.Conv2d(in_channels=c, out_channels=16, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2)
 
-        nn.init.kaiming_normal_(self.hidden.weight, nonlinearity="relu")
-        self.hidden.bias.data.zero_()
-        nn.init.xavier_uniform_(self.mu.weight)
-        self.mu.bias.data.zero_()
-        nn.init.kaiming_normal_(self.sigma.weight, nonlinearity="relu")
-        self.sigma.bias.data.zero_()
+        conv1_out_w = self.conv_shape(w, 8, 4)
+        conv1_out_h = self.conv_shape(h, 8, 4)
+        conv2_out_w = self.conv_shape(conv1_out_w, 4, 2)
+        conv2_out_h = self.conv_shape(conv1_out_h, 4, 2)
 
-    def forward(self, inputs):
-        x = inputs
-        x = F.relu(self.hidden(x))
-        mu = torch.tanh(self.mu(x))
-        sigma = F.softplus(self.sigma(x)) + 1e-4
+        flatten_size = conv2_out_w * conv2_out_h * 64
 
-        mu = mu * self.action_bounds[1]
-        # mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])
+        self.fc = nn.Linear(in_features=flatten_size, out_features=256)
+        self.value = nn.Linear(in_features=256, out_features=1)
+        self.logits = nn.Linear(in_features=256, out_features=self.n_actions)
 
-        return Normal(mu, sigma)
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
+                layer.bias.data.zero_()
 
-
-class Critic(nn.Module, ABC):
-    def __init__(self, n_states, n_hiddens=128):
-        super(Critic, self).__init__()
-        self.n_states = n_states
-        self.n_hiddens = n_hiddens
-
-        self.hidden = nn.Linear(self.n_states, self.n_hiddens)
-        self.value = nn.Linear(self.n_hiddens, 1)
-
-        nn.init.kaiming_normal_(self.hidden.weight, nonlinearity="relu")
-        self.hidden.bias.data.zero_()
+        nn.init.kaiming_normal_(self.fc.weight, nonlinearity="relu")
+        self.fc.bias.data.zero_()
         nn.init.xavier_uniform_(self.value.weight)
         self.value.bias.data.zero_()
+        nn.init.xavier_uniform_(self.logits.weight)
+        self.logits.bias.data.zero_()
 
     def forward(self, inputs):
-        x = inputs
-        x = F.relu(self.hidden(x))
+        x = inputs / 255.
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = x.contiguous()
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc(x))
         value = self.value(x)
+        probs = F.softmax(self.logits(x), dim=1)
+        dist = Categorical(probs)
 
-        return value
+        return dist, value, probs
+
+    @staticmethod
+    def conv_shape(input, kernel_size, stride, padding=0):
+        return (input + 2 * padding - kernel_size) // stride + 1

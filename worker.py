@@ -18,7 +18,8 @@ class Worker:
                  shared_actor_optimizer,
                  shared_critic_optimizer,
                  gamma,
-                 ent_coeff):
+                 ent_coeff,
+                 update_period):
         self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
@@ -26,6 +27,7 @@ class Worker:
         self.n_hiddens = n_hiddens
         self.gamma = gamma
         self.ent_coeff = ent_coeff
+        self.update_period = update_period
         self.env_name = env_name
         self.env = gym.make(self.env_name)
 

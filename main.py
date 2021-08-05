@@ -1,16 +1,18 @@
 import gym
-from model import Actor, Critic
-from shared_optimizer import SharedAdam
+from model import Model
+from shared_optimizer import SharedRMSProp
+from torch.optim.lr_scheduler import LambdaLR
 from worker import Worker
 from torch import multiprocessing as mp
-import os
 
 env_name = "Pendulum-v0"
-n_workers = os.cpu_count()
+n_workers = 2  # 16
 lr = 1e-4
-gamma = 0.9
+gamma = 0.99
+update_period = 5
 ent_coeff = 0.01
-n_hiddens = 128
+state_shape = (4, 84, 84)
+total_episodes = 2000
 
 
 def run_workers(worker):
@@ -19,27 +21,20 @@ def run_workers(worker):
 
 if __name__ == "__main__":
     test_env = gym.make(env_name)
-    n_states = test_env.observation_space.shape[0]
-    n_actions = test_env.action_space.shape[0]
-    actions_bounds = [test_env.action_space.low[0], test_env.action_space.high[0]]
+    n_actions = test_env.action_space.n
     test_env.close()
     print(f"Env: {env_name}\n"
-          f"n_states: {n_states}\n"
           f"n_actions: {n_actions}\n"
-          f"n_workers: {n_workers}\n"
-          f"action_bounds: {actions_bounds}")
+          f"n_workers: {n_workers}\n")
 
-    global_actor = Actor(n_states, n_actions, actions_bounds, n_hiddens * 2)
-    global_actor.share_memory()
+    global_model = Model(state_shape, n_actions)
+    global_model.share_memory()
 
-    global_critic = Critic(n_states)
-    global_critic.share_memory()
+    shared_opt = SharedRMSProp(global_model.parameters(), lr=lr)
+    shared_opt.share_memory()
 
-    shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
-    shared_actor_opt.share_memory()
-
-    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr * 10)
-    shared_critic_opt.share_memory()
+    schedule_fn = lambda episode: max(1.0 - float(episode / total_episodes), 0)
+    scheduler = LambdaLR(shared_opt, lr_lambda=schedule_fn)
 
     workers = [Worker(id=i,
                       n_states=n_states,
