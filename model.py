@@ -50,7 +50,7 @@ class Model(nn.Module, ABC):
         probs = F.softmax(self.logits(x), dim=1)
         dist = Categorical(probs)
 
-        return dist, value, probs
+        return dist, value
 
     @staticmethod
     def conv_shape(input, kernel_size, stride, padding=0):

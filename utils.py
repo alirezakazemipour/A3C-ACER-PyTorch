@@ -8,7 +8,7 @@ def preprocessing(x):
     return img
 
 
-def stack_states(stacked_frames, state, is_new_episode):
+def make_state(stacked_frames, state, is_new_episode):
     frame = preprocessing(state)
 
     if is_new_episode:

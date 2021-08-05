@@ -73,7 +73,7 @@ class EpisodicLifeEnv(gym.Wrapper):
         obs, reward, done, info = self.env.step(action)
         self.real_done = done
 
-        lives = info["lives"]
+        lives = info["ale.lives"]
         if self.lives > lives > 0:
             done = True
 

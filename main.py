@@ -1,11 +1,11 @@
 import gym
 from model import Model
 from shared_optimizer import SharedRMSProp
-from torch.optim.lr_scheduler import LambdaLR
+# from torch.optim.lr_scheduler import LambdaLR
 from worker import Worker
 from torch import multiprocessing as mp
 
-env_name = "Pendulum-v0"
+env_name = "PongNoFrameskip-v4"
 n_workers = 2  # 16
 lr = 1e-4
 gamma = 0.99
@@ -33,21 +33,18 @@ if __name__ == "__main__":
     shared_opt = SharedRMSProp(global_model.parameters(), lr=lr)
     shared_opt.share_memory()
 
-    schedule_fn = lambda episode: max(1.0 - float(episode / total_episodes), 0)
-    scheduler = LambdaLR(shared_opt, lr_lambda=schedule_fn)
+    # schedule_fn = lambda episode: max(1.0 - float(episode / total_episodes), 0)
+    # scheduler = LambdaLR(shared_opt, lr_lambda=schedule_fn)
 
     workers = [Worker(id=i,
-                      n_states=n_states,
+                      state_shape=state_shape,
                       n_actions=n_actions,
-                      action_bounds=actions_bounds,
                       env_name=env_name,
-                      n_hiddens=n_hiddens,
-                      global_actor=global_actor,
-                      global_critic=global_critic,
-                      shared_actor_optimizer=shared_actor_opt,
-                      shared_critic_optimizer=shared_critic_opt,
+                      global_model=global_model,
+                      shared_optimizer=shared_opt,
                       gamma=gamma,
-                      ent_coeff=ent_coeff) for i in range(n_workers)
+                      ent_coeff=ent_coeff,
+                      update_period=update_period) for i in range(n_workers)
                ]
     processes = []
 
