@@ -4,9 +4,10 @@ from shared_optimizer import SharedRMSProp
 # from torch.optim.lr_scheduler import LambdaLR
 from worker import Worker
 from torch import multiprocessing as mp
+import os
 
 env_name = "PongNoFrameskip-v4"
-n_workers = 16
+n_workers = os.cpu_count()
 lr = 1e-4
 gamma = 0.99
 update_period = 5
@@ -20,8 +21,14 @@ def run_workers(worker):
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
+
+    os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
+    os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
+
     test_env = gym.make(env_name)
     n_actions = test_env.action_space.n
+    max_steps_per_episode = test_env.spec.max_episode_steps
     test_env.close()
     print(f"Env: {env_name}\n"
           f"n_actions: {n_actions}\n"
@@ -44,7 +51,8 @@ if __name__ == "__main__":
                       shared_optimizer=shared_opt,
                       gamma=gamma,
                       ent_coeff=ent_coeff,
-                      update_period=update_period) for i in range(n_workers)
+                      update_period=update_period,
+                      max_steps_per_episode=max_steps_per_episode) for i in range(n_workers)
                ]
     processes = []
 

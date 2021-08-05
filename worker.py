@@ -16,7 +16,8 @@ class Worker:
                  shared_optimizer,
                  gamma,
                  ent_coeff,
-                 update_period):
+                 update_period,
+                 max_steps_per_episode):
 
         self.id = id
         self.state_shape = state_shape
@@ -31,6 +32,7 @@ class Worker:
         self.shared_optimizer = shared_optimizer
         self.mse_loss = torch.nn.MSELoss()
         self.ep = 0
+        self.max_steps_per_episode = max_steps_per_episode
 
     def get_actions_and_values(self, state):
 
@@ -66,7 +68,7 @@ class Worker:
 
             states, actions, rewards, dones = [], [], [], []
 
-            for step in range(1, 1 + self.env.spec.max_episode_steps):
+            for step in range(1, 1 + self.max_steps_per_episode):
                 action, _ = self.get_actions_and_values(state)
                 next_obs, reward, done, _ = self.env.step(action)
                 # self.env.render()
