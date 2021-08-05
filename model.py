@@ -11,7 +11,7 @@ class Actor(nn.Module, ABC):
         self.n_states = n_states
         self.n_actions = n_actions
         self.n_hiddens = n_hiddens
-        assert action_bounds[0] == -action_bounds[1], "computation of bounds of mu should change!"
+        assert action_bounds[0] == -action_bounds[1], "computation of bounds of the mu should change!"
         self.action_bounds = action_bounds
 
         self.hidden = nn.Linear(self.n_states, self.n_hiddens)
@@ -29,7 +29,7 @@ class Actor(nn.Module, ABC):
         x = inputs
         x = F.relu(self.hidden(x))
         mu = torch.tanh(self.mu(x))
-        sigma = F.softplus(self.sigma(x))
+        sigma = F.softplus(self.sigma(x)) + 1e-4
 
         mu = mu * self.action_bounds[1]
         # mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])

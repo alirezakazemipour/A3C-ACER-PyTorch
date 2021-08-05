@@ -39,7 +39,6 @@ class Worker:
         self.shared_critic_optimizer = shared_critic_optimizer
 
         self.mse_loss = torch.nn.MSELoss()
-        self.time_steps = 1
 
     def get_action(self, state):
         state = np.expand_dims(state, 0)
@@ -73,28 +72,33 @@ class Worker:
         running_reward = 0
         state = self.env.reset()
         next_state = None
-        done = False
         episode_reward = 0
         while True:
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-            states, actions, rewards, dones, next_states = [], [], [], [], []
+            states, actions, rewards, dones = [], [], [], []
 
-            while not done and self.time_steps % 10 != 0:
-
+            for step in range(1, 1 + self.env.spec.max_episode_steps):
                 action = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action[0])
-                # self.env.render()
+
                 states.append(state)
                 actions.append(action)
                 rewards.append(reward)
                 dones.append(done)
-                next_states.append(next_state)
+
                 episode_reward += reward
-                self.time_steps += 1
                 state = next_state
 
-            self.time_steps = 1
+                if done:
+                    state = self.env.reset()
+
+                    running_reward = 0.99 * running_reward + 0.01 * episode_reward
+                    print(f"\nWorker {self.id}: {running_reward:.0f}")
+                    episode_reward = 0
+
+                if step % 10 == 0:
+                    break
 
             R = self.get_value(next_state)[0]
             returns = []
@@ -128,11 +132,3 @@ class Worker:
 
             self.shared_actor_optimizer.step()
             self.shared_critic_optimizer.step()
-
-            if done:
-                state = self.env.reset()
-                done = False
-
-                running_reward = 0.9 * running_reward + 0.1 * episode_reward
-                print(f"\nWorker {self.id}: {running_reward:.0f}")
-                episode_reward = 0
