@@ -10,7 +10,6 @@ class Worker:
                  id,
                  n_states,
                  n_actions,
-                 action_bounds,
                  env_name,
                  n_hiddens,
                  global_actor,
@@ -22,14 +21,13 @@ class Worker:
         self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
-        self.action_bounds = action_bounds
         self.n_hiddens = n_hiddens
         self.gamma = gamma
         self.ent_coeff = ent_coeff
         self.env_name = env_name
         self.env = gym.make(self.env_name)
 
-        self.local_actor = Actor(self.n_states, self.n_actions, self.action_bounds, self.n_hiddens * 2)
+        self.local_actor = Actor(self.n_states, self.n_actions, self.n_hiddens * 2)
         self.local_critic = Critic(self.n_states)
 
         self.global_actor = global_actor
@@ -46,8 +44,7 @@ class Worker:
         with torch.no_grad():
             dist = self.local_actor(state)
             action = dist.sample()
-        action = np.clip(action.numpy(), self.action_bounds[0], self.action_bounds[1])
-        return action
+        return action.numpy()
 
     def get_value(self, state):
         state = np.expand_dims(state, 0)
@@ -83,11 +80,12 @@ class Worker:
 
             for step in range(1, 1 + self.env.spec.max_episode_steps):
                 action = self.get_action(state)
+                # print(action)
                 next_state, reward, done, _ = self.env.step(action[0])
 
                 states.append(state)
                 actions.append(action)
-                rewards.append((reward + 8.1) / 8.1)
+                rewards.append(reward)
                 dones.append(done)
 
                 episode_reward += reward
@@ -118,7 +116,7 @@ class Worker:
             returns = torch.Tensor(returns).view(-1, 1)
 
             dist = self.local_actor(states)
-            log_probs = dist.log_prob(actions)
+            log_probs = dist.log_prob(actions.squeeze(1))
 
             values = self.local_critic(states)
             advs = returns - values
