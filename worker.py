@@ -91,8 +91,7 @@ class Worker:
                     else:
                         running_reward = 0.9 * running_reward + 0.1 * episode_reward
 
-                    if self.id == 0 and self.ep % 1 == 0:
-                        print(f"\nWorker {self.id}: {running_reward:.0f}")
+                    print(f"\nW{self.id} Ep {self.ep}: {running_reward:.0f}")
                     episode_reward = 0
 
                 if step % self.update_period == 0 or done:

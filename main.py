@@ -1,7 +1,6 @@
 import gym
 from model import Model
-from shared_optimizer import SharedRMSProp
-# from torch.optim.lr_scheduler import LambdaLR
+from shared_optimizer import SharedAdam
 from worker import Worker
 from torch import multiprocessing as mp
 import os
@@ -10,7 +9,7 @@ env_name = "PongNoFrameskip-v4"
 n_workers = os.cpu_count()
 lr = 1e-4
 gamma = 0.99
-update_period = 5
+update_period = 80 // n_workers
 ent_coeff = 0.01
 state_shape = (4, 84, 84)
 total_episodes = 2000
@@ -37,11 +36,8 @@ if __name__ == "__main__":
     global_model = Model(state_shape, n_actions)
     global_model.share_memory()
 
-    shared_opt = SharedRMSProp(global_model.parameters(), lr=lr)
+    shared_opt = SharedAdam(global_model.parameters(), lr=lr)
     shared_opt.share_memory()
-
-    # schedule_fn = lambda episode: max(1.0 - float(episode / total_episodes), 0)
-    # scheduler = LambdaLR(shared_opt, lr_lambda=schedule_fn)
 
     workers = [Worker(id=i,
                       state_shape=state_shape,
