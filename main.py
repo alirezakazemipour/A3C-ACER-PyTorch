@@ -69,8 +69,8 @@ if __name__ == "__main__":
                       gamma=gamma,
                       ent_coeff=ent_coeff,
                       mem_size=mem_size,
-                      k=20,
-                      c=10,
+                      k=k,
+                      c=c,
                       delta=delta,
                       replay_ratio=replay_ratio,
                       polyak_coeff=polyak_coeff) for i in range(n_workers)

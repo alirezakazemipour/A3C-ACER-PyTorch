@@ -81,6 +81,21 @@ class Worker:
                 return
             global_param._grad = local_param.grad
 
+    def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
+        q_ret = next_value
+        q_returns = []
+        rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
+        for i in reversed(range(self.k)):
+            q_ret = rewards[i] + self.gamma * (~dones[i]) * q_ret
+            q_returns.insert(0, q_ret)
+            q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
+
+        return torch.cat(q_returns).view(-1, 1)
+
+    def soft_update_avg_network(self):
+        for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
+            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+
     def step(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
@@ -153,7 +168,7 @@ class Worker:
             values = (q_values * f).sum(-1, keepdims=True)
 
             if on_policy:
-                rho = torch.ones((self.k, self.n_actions))
+                rho = torch.ones_like(mus)
             else:
                 rho = f / (mus + 1e-6)
             rho_i = rho.gather(-1, actions.long())
@@ -178,22 +193,24 @@ class Worker:
         adv_bc = q_values.detach().gather(-1, actions.long()) - values
 
         logf_bc = torch.log(f + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f, dim=-1)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f.detach(), dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
         loss_q = self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
 
         # trust region:
-        g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
-        k = - f_avg / (f.detach() + 1e-6)
-        k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
-
-        adj = torch.max(torch.zeros_like(k_dot_g),
-                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
-
-        grads_f = - (g - adj * k)
-        f.backward(grads_f)
+        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), f)[0]
+        # k = -f_avg / (f.detach() + 1e-6)
+        # k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
+        #
+        # adj = torch.max(torch.zeros_like(k_dot_g),
+        #                 (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
+        #
+        # grads_f = -(g - adj * k)
+        # f.backward(grads_f)
+        loss = policy_loss - self.ent_coeff * ent
+        loss.backward()
         loss_q.backward()
 
         self.share_grads_to_global_models(self.local_actor, self.global_actor)
@@ -204,17 +221,4 @@ class Worker:
 
         self.soft_update_avg_network()
 
-    def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
-        q_ret = next_value
-        q_returns = []
-        rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
-        for i in reversed(range(self.k)):
-            q_ret = rewards[i] + self.gamma * (~dones[i]) * q_ret
-            q_returns.insert(0, q_ret)
-            q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
 
-        return torch.cat(q_returns).view(-1, 1)
-
-    def soft_update_avg_network(self):
-        for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
-            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
