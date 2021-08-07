@@ -6,12 +6,11 @@ from torch import multiprocessing as mp
 import os
 
 env_name = "PongNoFrameskip-v4"
-n_workers = os.cpu_count()
+n_workers = 2
 lr = 1e-4
 gamma = 0.99
 ent_coeff = 0.001
-n_hiddens = 128
-mem_size = 50000
+mem_size = 100000 // n_workers
 k = 20
 c = 10
 delta = 1

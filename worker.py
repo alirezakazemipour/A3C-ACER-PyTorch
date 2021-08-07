@@ -64,6 +64,10 @@ class Worker:
     def sync_thread_spec_params(self):
         self.local_model.load_state_dict(self.global_model.state_dict())
 
+    def soft_update_avg_network(self):
+        for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
+            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+
     @staticmethod
     def share_grads_to_global_models(local_model, global_model):
         for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
@@ -89,7 +93,7 @@ class Worker:
             for step in range(1, 1 + self.max_episode_steps):
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
-                # self.env.render()
+                self.env.render()
 
                 states.append(state)
                 actions.append(action)
@@ -111,8 +115,7 @@ class Worker:
                     else:
                         running_reward = 0.99 * running_reward + 0.01 * episode_reward
 
-                    if self.id == 0:
-                        print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
+                    print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
                     episode_reward = 0
 
                 if step % self.k == 0:
@@ -204,6 +207,4 @@ class Worker:
 
         return torch.cat(q_returns).view(-1, 1)
 
-    def soft_update_avg_network(self):
-        for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
-            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+
