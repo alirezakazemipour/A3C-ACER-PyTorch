@@ -3,6 +3,8 @@ import gym
 import numpy as np
 import torch
 from torch import from_numpy
+from memory import Memory
+from torch.nn.functional import relu
 
 
 class Worker:
@@ -13,11 +15,17 @@ class Worker:
                  env_name,
                  n_hiddens,
                  global_actor,
+                 avg_actor,
                  global_critic,
                  shared_actor_optimizer,
                  shared_critic_optimizer,
                  gamma,
-                 ent_coeff):
+                 ent_coeff,
+                 mem_size,
+                 k,
+                 c,
+                 delta,
+                 replay_ratio):
         self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
@@ -25,12 +33,19 @@ class Worker:
         self.gamma = gamma
         self.ent_coeff = ent_coeff
         self.env_name = env_name
+        self.mem_size = mem_size
+        self.k = k
+        self.c = c
+        self.delta = delta
+        self.replay_ratio = replay_ratio
+        self.memory = Memory(self.mem_size)
         self.env = gym.make(self.env_name)
 
         self.local_actor = Actor(self.n_states, self.n_actions, self.n_hiddens * 2)
-        self.local_critic = Critic(self.n_states)
+        self.local_critic = Critic(self.n_states, self.n_actions)
 
         self.global_actor = global_actor
+        self.avg_actor = avg_actor
         self.global_critic = global_critic
         self.shared_actor_optimizer = shared_actor_optimizer
         self.shared_critic_optimizer = shared_critic_optimizer
@@ -42,16 +57,18 @@ class Worker:
         state = np.expand_dims(state, 0)
         state = from_numpy(state).float()
         with torch.no_grad():
-            dist = self.local_actor(state)
+            dist, probs = self.local_actor(state)
             action = dist.sample()
-        return action.numpy()
+        return action.numpy(), probs.numpy()
 
-    def get_value(self, state):
+    def get_q_value(self, state, action):
         state = np.expand_dims(state, 0)
+        action = np.expand_dims(action, 0)
         state = from_numpy(state).float()
+        action = from_numpy(action).float()
         with torch.no_grad():
-            value = self.local_critic(state)
-        return value.numpy()
+            q_value = self.local_critic(state, action)
+        return q_value.numpy()
 
     def sync_thread_spec_params(self):
         self.local_actor.load_state_dict(self.global_actor.state_dict())
@@ -76,10 +93,10 @@ class Worker:
 
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-            states, actions, rewards, dones = [], [], [], []
+            states, actions, rewards, dones, mus = [], [], [], [], []
 
             for step in range(1, 1 + self.env.spec.max_episode_steps):
-                action = self.get_action(state)
+                action, mu = self.get_action(state)
                 # print(action)
                 next_state, reward, done, _ = self.env.step(action[0])
 
@@ -87,6 +104,7 @@ class Worker:
                 actions.append(action)
                 rewards.append(reward)
                 dones.append(done)
+                mus.append(mu)
 
                 episode_reward += reward
                 state = next_state
@@ -102,35 +120,94 @@ class Worker:
                         print(f"\nWorker {self.id}: {running_reward:.0f}")
                     episode_reward = 0
 
-                if step % 10 == 0 or done:
+                if step % self.k == 0:
                     break
 
-            R = self.get_value(next_state)[0]
-            returns = []
-            for r, d in zip(rewards[::-1], dones[::-1]):
-                R = r + self.gamma * R * (1 - d)
-                returns.insert(0, R)
+            trajectory = dict(states=states, actions=actions, rewards=rewards,
+                              dones=dones, mus=mus, next_state=next_state)
+            self.memory.add(**trajectory)
 
-            states = torch.Tensor(states).view(-1, self.n_states)
-            actions = torch.Tensor(actions).view(-1, 1)
-            returns = torch.Tensor(returns).view(-1, 1)
+            self.train(states, actions, rewards, dones, mus, next_state)
 
-            dist = self.local_actor(states)
-            log_probs = dist.log_prob(actions.squeeze(1))
+            n = np.random.poisson(self.replay_ratio)
+            for _ in range(n):
+                self.train(self.memory.sample(), on_policy=False)
 
-            values = self.local_critic(states)
-            advs = returns - values
+    def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
+        states = torch.Tensor(states)
+        mus = torch.Tensor(mus)
+        actions = torch.ByteTensor(actions)
+        next_state = torch.Tensor(next_state)
+        rewards = torch.Tensor(rewards)
+        dones = torch.BoolTensor(dones)
 
-            pg_loss = -(log_probs * advs.detach()).mean()
-            value_loss = self.mse_loss(values, returns)
+        dist, f = self.local_actor(states)
+        _, f_avg = self.avg_actor(states)
+        q_values = self.local_critic(states, actions)
+        values = (q_values * f.detach()).sum(-1)
 
-            actor_loss = pg_loss - self.ent_coeff * dist.entropy().mean()
+        with torch.no_grad():
+            if on_policy:
+                rho = torch.ones((self.k, self.n_actions))
+            else:
+                rho = f / mus
+            rho_i = rho.gather(-1, actions)
 
-            actor_loss.backward()
-            value_loss.backward()
+            next_action, next_mu = self.get_action(next_state)
+            next_q_value = self.get_q_value(next_state, torch.Tensor(next_action))
+            next_value = (next_q_value * next_mu).sum(-1)
 
-            self.share_grads_to_global_models(self.local_actor, self.global_actor)
-            self.share_grads_to_global_models(self.local_critic, self.global_critic)
+            q_ret = self.q_retrace(rewards, dones, q_values, values, next_value, rho_i)
 
-            self.shared_actor_optimizer.step()
-            self.shared_critic_optimizer.step()
+        ent = dist.entropy().mean()
+
+        # Truncated Importance Sampling:
+        adv = q_ret - values
+        f_i = f.gather(-1, actions)
+        logf_i = torch.log(f_i)
+        gain_f = logf_i * adv.detach() * torch.min(self.c, rho_i)
+        loss_f = -gain_f.mean()
+
+        # Bias correction for the truncation
+        adv_bc = q_values - values
+        logf_bc = torch.log(f)
+        gain_bc = torch.sum(logf_bc * adv_bc.detach() * relu(1 - self.c / rho) * f, dim=-1)
+        loss_bc = -gain_bc.mean()
+
+        policy_loss = loss_f + loss_bc
+        loss_q = self.mse_loss(q_ret, q_values)
+
+        # trust region:
+        g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)
+        k = - f_avg / f.detach()
+        k_dot_g = torch.sum(k * g, dim=-1)
+        adj = torch.max(0, (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1))
+
+        grads_f = - (g - adj * k)
+
+        (f * grads_f).backward()
+        loss_q.backward()
+
+        self.share_grads_to_global_models(self.local_actor, self.global_actor)
+        self.share_grads_to_global_models(self.local_critic, self.global_critic)
+
+        self.shared_actor_optimizer.step()
+        self.shared_critic_optimizer.step()
+
+        self.soft_update_avg_network()
+
+    def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
+        q_ret = next_value
+        q_returns = []
+        rho_bar_i = rho_i.clamp_max(1)
+        for r, d, rho_bar, q_value, value in zip(rewards[::-1], dones[::-1], rho_bar_i[::-1], q_values[::-1],
+                                                 values[::-1]):
+            q_ret = r + self.gamma * (~d) * q_ret
+            q_returns.insert(0, q_ret)
+            q_ret = rho_bar * (q_ret - q_value) + value
+
+        return torch.cat(q_returns)
+
+    def soft_update_avg_network(self, tau=0.005):
+        for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
+            avg_param.data.copy_(tau * global_param.data + (1 - tau) * avg_param.data)

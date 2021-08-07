@@ -5,11 +5,11 @@ from worker import Worker
 from torch import multiprocessing as mp
 import os
 
-env_name = "LunarLander-v2"
+env_name = "CartPole-v0"
 n_workers = 4
 lr = 1e-4
 gamma = 0.99
-ent_coeff = 0.1
+ent_coeff = 0.01
 n_hiddens = 128
 
 
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     global_actor = Actor(n_states, n_actions, n_hiddens * 2)
     global_actor.share_memory()
 
-    global_critic = Critic(n_states)
+    global_critic = Critic(n_states, n_actions)
     global_critic.share_memory()
 
     shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
@@ -39,12 +39,19 @@ if __name__ == "__main__":
     shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr * 10)
     shared_critic_opt.share_memory()
 
+    avg_actor = Actor(n_states, n_actions, n_hiddens * 2)
+    avg_actor.load_state_dict(global_actor.state_dict())
+    avg_actor.share_memory()
+    for p in avg_actor.parameters():
+        p.requires_grad = False
+
     workers = [Worker(id=i,
                       n_states=n_states,
                       n_actions=n_actions,
                       env_name=env_name,
                       n_hiddens=n_hiddens,
                       global_actor=global_actor,
+                      avg_actor=avg_actor,
                       global_critic=global_critic,
                       shared_actor_optimizer=shared_actor_opt,
                       shared_critic_optimizer=shared_critic_opt,

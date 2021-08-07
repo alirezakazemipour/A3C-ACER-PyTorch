@@ -25,26 +25,27 @@ class Actor(nn.Module, ABC):
         x = F.relu(self.hidden(x))
         probs = F.softmax(self.logits(x), dim=-1)
 
-        return Categorical(probs)
+        return Categorical(probs), probs
 
 
 class Critic(nn.Module, ABC):
-    def __init__(self, n_states, n_hiddens=128):
+    def __init__(self, n_states, n_actions, n_hiddens=128):
         super(Critic, self).__init__()
         self.n_states = n_states
+        self.n_actions = n_actions
         self.n_hiddens = n_hiddens
 
-        self.hidden = nn.Linear(self.n_states, self.n_hiddens)
-        self.value = nn.Linear(self.n_hiddens, 1)
+        self.hidden = nn.Linear(self.n_states + self.n_actions, self.n_hiddens)
+        self.q_value = nn.Linear(self.n_hiddens, 1)
 
         nn.init.kaiming_normal_(self.hidden.weight, nonlinearity="relu")
         self.hidden.bias.data.zero_()
-        nn.init.xavier_uniform_(self.value.weight)
-        self.value.bias.data.zero_()
+        nn.init.xavier_uniform_(self.q_value.weight)
+        self.q_value.bias.data.zero_()
 
-    def forward(self, inputs):
-        x = inputs
+    def forward(self, inputs, actions):
+        x = torch.cat([inputs, actions], dim=-1)
         x = F.relu(self.hidden(x))
-        value = self.value(x)
+        q_value = self.q_value(x)
 
-        return value
+        return q_value
