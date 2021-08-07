@@ -96,7 +96,7 @@ class Worker:
 
             states, actions, rewards, dones, mus = [], [], [], [], []
 
-            for step in range(1, 1 + self.env.spec.max_episode_steps):
+            for step in range(1, 1 + self.env._max_episode_steps):
                 action, mu = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action[0])
 
