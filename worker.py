@@ -1,5 +1,4 @@
 from model import Model
-import gym
 import numpy as np
 import torch
 from torch import from_numpy
@@ -25,7 +24,9 @@ class Worker:
                  c,
                  delta,
                  replay_ratio,
-                 polyak_coeff):
+                 polyak_coeff,
+                 critic_coeff,
+                 max_episode_steps):
         self.id = id
         self.state_shape = state_shape
         self.n_actions = n_actions
@@ -38,8 +39,10 @@ class Worker:
         self.delta = delta
         self.replay_ratio = replay_ratio
         self.polyak_coeff = polyak_coeff
+        self.critic_coeff = critic_coeff
+        self.max_episode_steps = max_episode_steps
         self.memory = Memory(self.mem_size)
-        self.env = gym.make(self.env_name)
+        self.env = make_atari(self.env_name)
 
         self.local_model = Model(self.state_shape, self.n_actions)
 
@@ -56,7 +59,7 @@ class Worker:
         with torch.no_grad():
             dist, values, probs = self.local_model(state)
             action = dist.sample()
-        return action.numpy(), values.numpy(), action.numpy()
+        return action.numpy(), values.numpy(), probs.numpy()
 
     def sync_thread_spec_params(self):
         self.local_model.load_state_dict(self.global_model.state_dict())
@@ -83,14 +86,14 @@ class Worker:
 
             states, actions, rewards, dones, mus = [], [], [], [], []
 
-            for step in range(1, 1 + self.env.spec.max_episode_steps):
+            for step in range(1, 1 + self.max_episode_steps):
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
 
                 states.append(state)
                 actions.append(action)
-                rewards.append(reward)
+                rewards.append(np.sign(reward))
                 dones.append(done)
                 mus.append(mu[0])
 
@@ -128,7 +131,7 @@ class Worker:
                 self.train(*self.memory.sample(), on_policy=False)
 
     def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
-        states = torch.Tensor(states)
+        states = torch.ByteTensor(states)
         mus = torch.Tensor(mus)
         actions = torch.ByteTensor(actions)
         next_state = torch.Tensor(next_state)
@@ -147,7 +150,7 @@ class Worker:
                 rho = f / (mus + 1e-6)
             rho_i = rho.gather(-1, actions.long())
 
-            next_action, next_q_value, next_mu = self.get_actions_and_qvalues(next_state)
+            _, next_q_value, next_mu = self.get_actions_and_qvalues(next_state)
             next_value = (next_q_value * next_mu).sum(-1)
 
             q_ret = self.q_retrace(rewards, dones, q_values.detach().gather(-1, actions.long()),
@@ -170,7 +173,7 @@ class Worker:
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
+        loss_q = self.critic_coeff * self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
 
         # trust region:
         g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
@@ -181,7 +184,7 @@ class Worker:
                         (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
 
         grads_f = - (g - adj * k)
-        f.backward(grads_f)
+        f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 
         self.share_grads_to_global_models(self.local_model, self.global_model)

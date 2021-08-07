@@ -6,17 +6,18 @@ from torch import multiprocessing as mp
 import os
 
 env_name = "PongNoFrameskip-v4"
-n_workers = 4
+n_workers = os.cpu_count()
 lr = 1e-4
 gamma = 0.99
 ent_coeff = 0.001
 n_hiddens = 128
-mem_size = 5000
+mem_size = 50000
 k = 20
 c = 10
 delta = 1
 replay_ratio = 4
 polyak_coeff = 0.01
+critic_coeff = 0.5
 state_shape = (4, 84, 84)
 
 
@@ -32,6 +33,7 @@ if __name__ == "__main__":
 
     test_env = gym.make(env_name)
     n_actions = test_env.action_space.n
+    max_episode_steps = test_env.spec.max_episode_steps
     test_env.close()
     print(f"Env: {env_name}\n"
           f"n_actions: {n_actions}\n"
@@ -59,11 +61,13 @@ if __name__ == "__main__":
                       gamma=gamma,
                       ent_coeff=ent_coeff,
                       mem_size=mem_size,
-                      k=20,
-                      c=10,
+                      k=k,
+                      c=c,
                       delta=delta,
                       replay_ratio=replay_ratio,
-                      polyak_coeff=polyak_coeff) for i in range(n_workers)
+                      polyak_coeff=polyak_coeff,
+                      critic_coeff=critic_coeff,
+                      max_episode_steps=max_episode_steps) for i in range(n_workers)
                ]
     processes = []
 
