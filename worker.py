@@ -25,7 +25,8 @@ class Worker:
                  k,
                  c,
                  delta,
-                 replay_ratio):
+                 replay_ratio,
+                 polyak_coeff):
         self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
@@ -38,6 +39,7 @@ class Worker:
         self.c = c
         self.delta = delta
         self.replay_ratio = replay_ratio
+        self.polyak_coeff = polyak_coeff
         self.memory = Memory(self.mem_size)
         self.env = gym.make(self.env_name)
 
@@ -61,13 +63,11 @@ class Worker:
             action = dist.sample()
         return action.numpy(), probs.numpy()
 
-    def get_q_value(self, state, action):
+    def get_q_value(self, state):
         state = np.expand_dims(state, 0)
-        action = np.expand_dims(action, 0)
         state = from_numpy(state).float()
-        action = from_numpy(action).float()
         with torch.no_grad():
-            q_value = self.local_critic(state, action)
+            q_value = self.local_critic(state)
         return q_value.numpy()
 
     def sync_thread_spec_params(self):
@@ -97,14 +97,13 @@ class Worker:
 
             for step in range(1, 1 + self.env.spec.max_episode_steps):
                 action, mu = self.get_action(state)
-                # print(action)
                 next_state, reward, done, _ = self.env.step(action[0])
 
                 states.append(state)
                 actions.append(action)
                 rewards.append(reward)
                 dones.append(done)
-                mus.append(mu)
+                mus.append(mu[0])
 
                 episode_reward += reward
                 state = next_state
@@ -129,9 +128,9 @@ class Worker:
 
             self.train(states, actions, rewards, dones, mus, next_state)
 
-            n = np.random.poisson(self.replay_ratio)
-            for _ in range(n):
-                self.train(self.memory.sample(), on_policy=False)
+            # n = np.random.poisson(self.replay_ratio)
+            # for _ in range(n):
+            #     self.train(self.memory.sample(), on_policy=False)
 
     def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
         states = torch.Tensor(states)
@@ -143,48 +142,52 @@ class Worker:
 
         dist, f = self.local_actor(states)
         _, f_avg = self.avg_actor(states)
-        q_values = self.local_critic(states, actions)
-        values = (q_values * f.detach()).sum(-1)
+        q_values = self.local_critic(states)
 
         with torch.no_grad():
+            values = (q_values * f).sum(-1, keepdims=True)
+
             if on_policy:
                 rho = torch.ones((self.k, self.n_actions))
             else:
                 rho = f / mus
-            rho_i = rho.gather(-1, actions)
+            rho_i = rho.gather(-1, actions.long())
 
             next_action, next_mu = self.get_action(next_state)
-            next_q_value = self.get_q_value(next_state, torch.Tensor(next_action))
+            next_q_value = self.get_q_value(next_state)
             next_value = (next_q_value * next_mu).sum(-1)
 
-            q_ret = self.q_retrace(rewards, dones, q_values, values, next_value, rho_i)
+            q_ret = self.q_retrace(rewards, dones, q_values.detach().gather(-1, actions.long()),
+                                   values, next_value, rho_i)
 
         ent = dist.entropy().mean()
 
         # Truncated Importance Sampling:
         adv = q_ret - values
-        f_i = f.gather(-1, actions)
+        f_i = f.gather(-1, actions.long())
         logf_i = torch.log(f_i)
-        gain_f = logf_i * adv.detach() * torch.min(self.c, rho_i)
+        gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
-        adv_bc = q_values - values
+        adv_bc = q_values.detach().gather(-1, actions.long()) - values
+
         logf_bc = torch.log(f)
-        gain_bc = torch.sum(logf_bc * adv_bc.detach() * relu(1 - self.c / rho) * f, dim=-1)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / rho) * f, dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = self.mse_loss(q_ret, q_values)
+        loss_q = self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
 
         # trust region:
-        g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)
+        g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
         k = - f_avg / f.detach()
-        k_dot_g = torch.sum(k * g, dim=-1)
-        adj = torch.max(0, (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1))
+        k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
+
+        adj = torch.max(torch.zeros_like(k_dot_g), (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1, keepdim=True))
 
         grads_f = - (g - adj * k)
-
+        print(f.shape)
         (f * grads_f).backward()
         loss_q.backward()
 
@@ -199,15 +202,14 @@ class Worker:
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
         q_returns = []
-        rho_bar_i = rho_i.clamp_max(1)
-        for r, d, rho_bar, q_value, value in zip(rewards[::-1], dones[::-1], rho_bar_i[::-1], q_values[::-1],
-                                                 values[::-1]):
-            q_ret = r + self.gamma * (~d) * q_ret
+        rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
+        for i in reversed(range(self.k)):
+            q_ret = rewards[i] + self.gamma * (~dones[i]) * q_ret
             q_returns.insert(0, q_ret)
-            q_ret = rho_bar * (q_ret - q_value) + value
+            q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
 
-        return torch.cat(q_returns)
+        return torch.cat(q_returns).view(-1, 1)
 
-    def soft_update_avg_network(self, tau=0.005):
+    def soft_update_avg_network(self):
         for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
-            avg_param.data.copy_(tau * global_param.data + (1 - tau) * avg_param.data)
+            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)

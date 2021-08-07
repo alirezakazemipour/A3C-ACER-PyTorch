@@ -6,11 +6,17 @@ from torch import multiprocessing as mp
 import os
 
 env_name = "CartPole-v0"
-n_workers = 4
+n_workers = 1
 lr = 1e-4
 gamma = 0.99
-ent_coeff = 0.01
+ent_coeff = 0.001
 n_hiddens = 128
+mem_size = 5000
+k = 20
+c = 10
+delta = 1
+replay_ratio = 4
+polyak_coeff = 0.01
 
 
 def run_workers(worker):
@@ -56,7 +62,13 @@ if __name__ == "__main__":
                       shared_actor_optimizer=shared_actor_opt,
                       shared_critic_optimizer=shared_critic_opt,
                       gamma=gamma,
-                      ent_coeff=ent_coeff) for i in range(n_workers)
+                      ent_coeff=ent_coeff,
+                      mem_size=mem_size,
+                      k=20,
+                      c=10,
+                      delta=delta,
+                      replay_ratio=replay_ratio,
+                      polyak_coeff=polyak_coeff) for i in range(n_workers)
                ]
     processes = []
 

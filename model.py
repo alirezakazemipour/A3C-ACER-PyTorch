@@ -35,16 +35,16 @@ class Critic(nn.Module, ABC):
         self.n_actions = n_actions
         self.n_hiddens = n_hiddens
 
-        self.hidden = nn.Linear(self.n_states + self.n_actions, self.n_hiddens)
-        self.q_value = nn.Linear(self.n_hiddens, 1)
+        self.hidden = nn.Linear(self.n_states, self.n_hiddens)
+        self.q_value = nn.Linear(self.n_hiddens, self.n_actions)
 
         nn.init.kaiming_normal_(self.hidden.weight, nonlinearity="relu")
         self.hidden.bias.data.zero_()
         nn.init.xavier_uniform_(self.q_value.weight)
         self.q_value.bias.data.zero_()
 
-    def forward(self, inputs, actions):
-        x = torch.cat([inputs, actions], dim=-1)
+    def forward(self, inputs):
+        x = inputs
         x = F.relu(self.hidden(x))
         q_value = self.q_value(x)
 
