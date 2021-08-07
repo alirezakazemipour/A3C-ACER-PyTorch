@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
     for worker in workers:
         p = mp.Process(target=run_workers, args=(worker,))
-        p.daemon = True
+        # p.daemon = True
         p.start()
         processes.append(p)
 

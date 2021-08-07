@@ -98,6 +98,7 @@ class Worker:
             for step in range(1, 1 + self.env._max_episode_steps):
                 action, mu = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action[0])
+                #self.env.render()
 
                 states.append(state)
                 actions.append(action)
@@ -117,7 +118,7 @@ class Worker:
                         running_reward = 0.99 * running_reward + 0.01 * episode_reward
 
                     if self.id == 0:
-                        print(f"\nW{self.id} Ep {self.ep}: {running_reward:.0f}")
+                        print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
                     episode_reward = 0
 
                 if step % self.k == 0:
