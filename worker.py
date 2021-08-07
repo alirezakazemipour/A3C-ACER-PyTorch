@@ -60,6 +60,7 @@ class Worker:
         state = from_numpy(state).float()
         with torch.no_grad():
             dist, probs = self.local_actor(state)
+            # print(probs)
             action = dist.sample()
         return action.numpy(), probs.numpy()
 
@@ -128,9 +129,9 @@ class Worker:
 
             self.train(states, actions, rewards, dones, mus, next_state)
 
-            # n = np.random.poisson(self.replay_ratio)
-            # for _ in range(n):
-            #     self.train(self.memory.sample(), on_policy=False)
+            n = np.random.poisson(self.replay_ratio)
+            for _ in range(n):
+                self.train(*self.memory.sample(), on_policy=False)
 
     def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
         states = torch.Tensor(states)
@@ -187,8 +188,7 @@ class Worker:
         adj = torch.max(torch.zeros_like(k_dot_g), (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1, keepdim=True))
 
         grads_f = - (g - adj * k)
-        print(f.shape)
-        (f * grads_f).backward()
+        f.backward(grads_f)
         loss_q.backward()
 
         self.share_grads_to_global_models(self.local_actor, self.global_actor)

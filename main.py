@@ -5,8 +5,8 @@ from worker import Worker
 from torch import multiprocessing as mp
 import os
 
-env_name = "CartPole-v0"
-n_workers = 1
+env_name = "LunarLander-v2"
+n_workers = 2
 lr = 1e-4
 gamma = 0.99
 ent_coeff = 0.001

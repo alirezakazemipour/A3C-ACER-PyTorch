@@ -22,8 +22,8 @@ class Memory:
 
         assert len(self.state_buffer) <= self.memory_size
 
-    def sample(self, size=1):
-        idx = np.random.randint(0, len(self), size)
+    def sample(self):
+        idx = np.random.randint(0, len(self))
         return self.state_buffer[idx], self.action_buffer[idx], self.reward_buffer[idx],\
                self.done_buffer[idx], self.mu_buffer[idx], self.next_state_buffer[idx]
 
