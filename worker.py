@@ -60,7 +60,6 @@ class Worker:
         state = from_numpy(state).float()
         with torch.no_grad():
             dist, probs = self.local_actor(state)
-            # print(probs)
             action = dist.sample()
         return action.numpy(), probs.numpy()
 
@@ -126,11 +125,14 @@ class Worker:
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
-
             self.train(states, actions, rewards, dones, mus, next_state)
 
             n = np.random.poisson(self.replay_ratio)
             for _ in range(n):
+                self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+                self.shared_critic_optimizer.zero_grad()
+                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+
                 self.train(*self.memory.sample(), on_policy=False)
 
     def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
