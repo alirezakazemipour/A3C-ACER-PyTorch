@@ -116,7 +116,8 @@ class Worker:
                     else:
                         running_reward = 0.99 * running_reward + 0.01 * episode_reward
 
-                    print(f"\nW{self.id} Ep {self.ep}: {running_reward:.0f}")
+                    if self.id == 0:
+                        print(f"\nW{self.id} Ep {self.ep}: {running_reward:.0f}")
                     episode_reward = 0
 
                 if step % self.k == 0:
@@ -176,7 +177,7 @@ class Worker:
         adv_bc = q_values.detach().gather(-1, actions.long()) - values
 
         logf_bc = torch.log(f + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / rho) * f, dim=-1)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f, dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
@@ -187,7 +188,8 @@ class Worker:
         k = - f_avg / (f.detach() + 1e-6)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
-        adj = torch.max(torch.zeros_like(k_dot_g), (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1, keepdim=True))
+        adj = torch.max(torch.zeros_like(k_dot_g),
+                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
 
         grads_f = - (g - adj * k)
         f.backward(grads_f)
