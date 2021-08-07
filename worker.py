@@ -115,8 +115,8 @@ class Worker:
                         running_reward = episode_reward
                     else:
                         running_reward = 0.99 * running_reward + 0.01 * episode_reward
-                    if self.id == 0:
-                        print(f"\nWorker {self.id}: {running_reward:.0f}")
+
+                    print(f"\nW{self.id} Ep {self.ep}: {running_reward:.0f}")
                     episode_reward = 0
 
                 if step % self.k == 0:
@@ -153,7 +153,7 @@ class Worker:
             if on_policy:
                 rho = torch.ones((self.k, self.n_actions))
             else:
-                rho = f / mus
+                rho = f / (mus + 1e-6)
             rho_i = rho.gather(-1, actions.long())
 
             next_action, next_mu = self.get_action(next_state)
@@ -168,14 +168,14 @@ class Worker:
         # Truncated Importance Sampling:
         adv = q_ret - values
         f_i = f.gather(-1, actions.long())
-        logf_i = torch.log(f_i)
+        logf_i = torch.log(f_i + 1e-6)
         gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
         adv_bc = q_values.detach().gather(-1, actions.long()) - values
 
-        logf_bc = torch.log(f)
+        logf_bc = torch.log(f + 1e-6)
         gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / rho) * f, dim=-1)
         loss_bc = -gain_bc.mean()
 
@@ -184,7 +184,7 @@ class Worker:
 
         # trust region:
         g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
-        k = - f_avg / f.detach()
+        k = - f_avg / (f.detach() + 1e-6)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g), (k_dot_g - self.delta) / torch.sum(k.square(), dim=-1, keepdim=True))
