@@ -71,8 +71,8 @@ class Worker:
     @staticmethod
     def share_grads_to_global_models(local_model, global_model):
         for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
-            if global_param.grad is not None:
-                return
+            # if global_param.grad is not None:
+            #     return
             global_param._grad = local_param.grad
 
     def step(self):
@@ -90,10 +90,10 @@ class Worker:
 
             states, actions, rewards, dones, mus = [], [], [], [], []
 
-            for step in range(1, 1 + self.max_episode_steps):
+            for step in range(1, 1 + self.k):
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
-                self.env.render()
+                # self.env.render()
 
                 states.append(state)
                 actions.append(action)
@@ -117,9 +117,6 @@ class Worker:
 
                     print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
                     episode_reward = 0
-
-                if step % self.k == 0:
-                    break
 
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
@@ -169,10 +166,10 @@ class Worker:
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
-        adv_bc = q_values.detach().gather(-1, actions.long()) - values
+        adv_bc = q_values.detach() - values
 
         logf_bc = torch.log(f + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f, dim=-1)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f.detach(), dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc

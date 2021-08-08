@@ -6,12 +6,12 @@ from torch import multiprocessing as mp
 import os
 
 env_name = "PongNoFrameskip-v4"
-n_workers = 2
-lr = 1e-4
+n_workers = 4
+lr = 7e-4
 gamma = 0.99
 ent_coeff = 0.001
-mem_size = 100000 // n_workers
 k = 20
+mem_size = 100000 // n_workers // k
 c = 10
 delta = 1
 replay_ratio = 4
@@ -72,6 +72,7 @@ if __name__ == "__main__":
 
     for worker in workers:
         p = mp.Process(target=run_workers, args=(worker,))
+        p.daemon = True
         p.start()
         processes.append(p)
 
