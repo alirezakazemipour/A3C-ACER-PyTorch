@@ -1,5 +1,5 @@
 import gym
-from model import Actor, Critic
+from model import Actor, SDNCritic
 from shared_optimizer import SharedAdam
 from worker import Worker
 from torch import multiprocessing as mp
@@ -8,18 +8,19 @@ import torch
 import numpy as np
 import random
 
-env_name = "LunarLander-v2"
-n_workers = 8
+env_name = "Pendulum-v0"
+n_workers = 2
 lr = 7e-4
 gamma = 0.99
 ent_coeff = 0.001
 n_hiddens = 128
 mem_size = 5000
-k = 20
-c = 10
+k = 50
+c = 5
 delta = 1
 replay_ratio = 4
-polyak_coeff = 0.01
+polyak_coeff = 0.005
+n_sdn = 5
 
 
 def run_workers(worker, lock):
@@ -38,7 +39,8 @@ if __name__ == "__main__":
 
     test_env = gym.make(env_name)
     n_states = test_env.observation_space.shape[0]
-    n_actions = test_env.action_space.n
+    n_actions = test_env.action_space.shape[0]
+    actions_bounds = [test_env.action_space.low[0], test_env.action_space.high[0]]
     test_env.close()
     print(f"Env: {env_name}\n"
           f"n_states: {n_states}\n"
@@ -48,7 +50,7 @@ if __name__ == "__main__":
     global_actor = Actor(n_states, n_actions, n_hiddens * 2)
     global_actor.share_memory()
 
-    global_critic = Critic(n_states, n_actions)
+    global_critic = SDNCritic(n_states, n_actions)
     global_critic.share_memory()
 
     shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
@@ -66,6 +68,7 @@ if __name__ == "__main__":
     workers = [Worker(id=i,
                       n_states=n_states,
                       n_actions=n_actions,
+                      actions_bounds=actions_bounds,
                       env_name=env_name,
                       n_hiddens=n_hiddens,
                       global_actor=global_actor,
@@ -78,6 +81,7 @@ if __name__ == "__main__":
                       mem_size=mem_size,
                       k=k,
                       c=c,
+                      n_sdn=n_sdn,
                       delta=delta,
                       replay_ratio=replay_ratio,
                       polyak_coeff=polyak_coeff) for i in range(n_workers)

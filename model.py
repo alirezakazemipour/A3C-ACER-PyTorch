@@ -11,7 +11,6 @@ class Actor(nn.Module, ABC):
         self.n_states = n_states
         self.n_actions = n_actions
         self.n_hiddens = n_hiddens
-        assert action_bounds[0] == -action_bounds[1], "computation of bounds of the mu should change!"
         self.action_bounds = action_bounds
 
         self.hidden = nn.Linear(self.n_states, self.n_hiddens)
@@ -28,7 +27,7 @@ class Actor(nn.Module, ABC):
         mu = self.mu(x)
         # mu = mu * self.action_bounds[1]
 
-        return MultivariateNormal(mu, 0.3 * torch.eye(mu.size()))
+        return MultivariateNormal(mu, 0.3 * torch.eye(mu.size(1))), mu
 
 
 class SDNCritic(nn.Module, ABC):
@@ -60,7 +59,7 @@ class SDNCritic(nn.Module, ABC):
         x = F.relu(self.hidden_adv(torch.cat([inputs, a], dim=-1)))
         adv = self.adv(x)
 
-        x = F.relu(self.hidden_adv(torch.cat([inputs, u], dim=-1)))
+        x = F.relu(self.hidden_adv(torch.cat([inputs.view(-1, self.n_states, 1), u], dim=1)))
         adv_mean = self.adv(x).mean(1, keepdim=True)
 
-        return value + adv - adv_mean
+        return value + adv - adv_mean, value
