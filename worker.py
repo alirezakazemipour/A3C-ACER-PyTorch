@@ -42,6 +42,7 @@ class Worker:
         self.polyak_coeff = polyak_coeff
         self.memory = Memory(self.mem_size)
         self.env = gym.make(self.env_name)
+        self.env.seed(self.id + 1)
 
         self.local_actor = Actor(self.n_states, self.n_actions, self.n_hiddens * 2)
         self.local_critic = Critic(self.n_states, self.n_actions)
@@ -70,16 +71,19 @@ class Worker:
             q_value = self.local_critic(state)
         return q_value.numpy()
 
-    def sync_thread_spec_params(self):
-        self.local_actor.load_state_dict(self.global_actor.state_dict())
-        self.local_critic.load_state_dict(self.global_critic.state_dict())
+    def sync_thread_spec_params(self, lock):
+        with lock:
+            self.local_actor.load_state_dict(self.global_actor.state_dict())
+            self.local_critic.load_state_dict(self.global_critic.state_dict())
 
     @staticmethod
-    def share_grads_to_global_models(local_model, global_model):
-        for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
-            if global_param.grad is not None:
-                return
-            global_param._grad = local_param.grad
+    def share_grads_to_global_models(local_model, global_model, lock):
+        with lock:
+            for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
+                # if global_param.grad is not None:
+                #     return
+
+                global_param._grad = local_param.grad
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
@@ -92,31 +96,32 @@ class Worker:
 
         return torch.cat(q_returns).view(-1, 1)
 
-    def soft_update_avg_network(self):
-        for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
-            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+    def soft_update_avg_network(self, lock):
+        with lock:
+            for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
+                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
 
-    def step(self):
+    def step(self, lock):
         print(f"Worker: {self.id} started.")
         running_reward = 0
         state = self.env.reset()
         next_state = None
         episode_reward = 0
+        lock = lock
         while True:
-            self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-            self.shared_critic_optimizer.zero_grad()
-
-            self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+            with lock:
+                self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+                self.shared_critic_optimizer.zero_grad()
+            self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, mus = [], [], [], [], []
-
-            for step in range(1, 1 + self.env._max_episode_steps):
+            for step in range(1, 1 + self.k):
                 action, mu = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action[0])
-                #self.env.render()
+                # self.env.render()
 
                 states.append(state)
-                actions.append(action)
+                actions.append(action[0])
                 rewards.append(reward)
                 dones.append(done)
                 mus.append(mu[0])
@@ -136,26 +141,24 @@ class Worker:
                         print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
                     episode_reward = 0
 
-                if step % self.k == 0:
-                    break
-
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
-            self.train(states, actions, rewards, dones, mus, next_state)
+            self.train(states, actions, rewards, dones, mus, next_state, lock)
 
             n = np.random.poisson(self.replay_ratio)
             for _ in range(n):
-                self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-                self.shared_critic_optimizer.zero_grad()
-                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+                with lock:
+                    self.shared_actor_optimizer.zero_grad()  # Reset global gradients
+                    self.shared_critic_optimizer.zero_grad()
+                self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
 
-                self.train(*self.memory.sample(), on_policy=False)
+                self.train(*self.memory.sample(), lock)
 
-    def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
+    def train(self, states, actions, rewards, dones, mus, next_state, lock):
         states = torch.Tensor(states)
         mus = torch.Tensor(mus)
-        actions = torch.ByteTensor(actions)
+        actions = torch.LongTensor(actions).view(-1, 1)
         next_state = torch.Tensor(next_state)
         rewards = torch.Tensor(rewards)
         dones = torch.BoolTensor(dones)
@@ -163,62 +166,58 @@ class Worker:
         dist, f = self.local_actor(states)
         _, f_avg = self.avg_actor(states)
         q_values = self.local_critic(states)
+        q_i = q_values.gather(-1, actions)
 
         with torch.no_grad():
             values = (q_values * f).sum(-1, keepdims=True)
 
-            if on_policy:
-                rho = torch.ones_like(mus)
-            else:
-                rho = f / (mus + 1e-6)
-            rho_i = rho.gather(-1, actions.long())
+            rho = f / (mus + 1e-6)
+            rho_i = rho.gather(-1, actions)
 
-            next_action, next_mu = self.get_action(next_state)
+            _, next_mu = self.get_action(next_state)
             next_q_value = self.get_q_value(next_state)
             next_value = (next_q_value * next_mu).sum(-1)
 
-            q_ret = self.q_retrace(rewards, dones, q_values.detach().gather(-1, actions.long()),
-                                   values, next_value, rho_i)
+            q_ret = self.q_retrace(rewards, dones, q_i, values, next_value, rho_i)
 
         ent = dist.entropy().mean()
 
         # Truncated Importance Sampling:
         adv = q_ret - values
-        f_i = f.gather(-1, actions.long())
+        f_i = f.gather(-1, actions)
         logf_i = torch.log(f_i + 1e-6)
         gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
-        adv_bc = q_values.detach().gather(-1, actions.long()) - values
+        adv_bc = q_values.detach() - values
 
         logf_bc = torch.log(f + 1e-6)
         gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f.detach(), dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
+        loss_q = self.mse_loss(q_ret, q_i)
 
-        # trust region:
-        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), f)[0]
-        # k = -f_avg / (f.detach() + 1e-6)
-        # k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
-        #
-        # adj = torch.max(torch.zeros_like(k_dot_g),
-        #                 (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
-        #
-        # grads_f = -(g - adj * k)
-        # f.backward(grads_f)
-        loss = policy_loss - self.ent_coeff * ent
-        loss.backward()
+        # # trust region:
+        g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), f)[0]
+        k = -f_avg / (f.detach() + 1e-6)
+        k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
+
+        adj = torch.max(torch.zeros_like(k_dot_g),
+                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
+
+        grads_f = -(g - adj * k)
+        f.backward(grads_f)
+        # loss = policy_loss - self.ent_coeff * ent
+        # loss.backward()
         loss_q.backward()
 
-        self.share_grads_to_global_models(self.local_actor, self.global_actor)
-        self.share_grads_to_global_models(self.local_critic, self.global_critic)
+        self.share_grads_to_global_models(self.local_actor, self.global_actor, lock)
+        self.share_grads_to_global_models(self.local_critic, self.global_critic, lock)
 
-        self.shared_actor_optimizer.step()
-        self.shared_critic_optimizer.step()
+        with lock:
+            self.shared_actor_optimizer.step()
+            self.shared_critic_optimizer.step()
 
-        self.soft_update_avg_network()
-
-
+        self.soft_update_avg_network(lock)

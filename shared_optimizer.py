@@ -1,6 +1,5 @@
 from torch import optim
 import torch
-import math
 
 
 class SharedAdam(optim.Adam):

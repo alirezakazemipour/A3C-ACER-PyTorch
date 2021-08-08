@@ -4,10 +4,13 @@ from shared_optimizer import SharedAdam
 from worker import Worker
 from torch import multiprocessing as mp
 import os
+import torch
+import numpy as np
+import random
 
 env_name = "LunarLander-v2"
-n_workers = 4
-lr = 1e-4
+n_workers = 8
+lr = 7e-4
 gamma = 0.99
 ent_coeff = 0.001
 n_hiddens = 128
@@ -19,8 +22,8 @@ replay_ratio = 4
 polyak_coeff = 0.01
 
 
-def run_workers(worker):
-    worker.step()
+def run_workers(worker, lock):
+    worker.step(lock)
 
 
 if __name__ == "__main__":
@@ -28,6 +31,10 @@ if __name__ == "__main__":
 
     os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
     os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
+
+    torch.manual_seed(123)
+    np.random.seed(123)
+    random.seed(123)
 
     test_env = gym.make(env_name)
     n_states = test_env.observation_space.shape[0]
@@ -47,7 +54,7 @@ if __name__ == "__main__":
     shared_actor_opt = SharedAdam(global_actor.parameters(), lr=lr)
     shared_actor_opt.share_memory()
 
-    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr * 10)
+    shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr)
     shared_critic_opt.share_memory()
 
     avg_actor = Actor(n_states, n_actions, n_hiddens * 2)
@@ -77,9 +84,10 @@ if __name__ == "__main__":
                ]
     processes = []
 
+    lock = mp.Lock()
     for worker in workers:
-        p = mp.Process(target=run_workers, args=(worker,))
-        # p.daemon = True
+        p = mp.Process(target=run_workers, args=(worker, lock))
+        p.daemon = True
         p.start()
         processes.append(p)
 
