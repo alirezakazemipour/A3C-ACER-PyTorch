@@ -6,7 +6,7 @@ from torch import multiprocessing as mp
 import os
 
 env_name = "PongNoFrameskip-v4"
-n_workers = 4
+n_workers = os.cpu_count()
 lr = 7e-4
 gamma = 0.99
 ent_coeff = 0.001
@@ -20,8 +20,8 @@ critic_coeff = 0.5
 state_shape = (4, 84, 84)
 
 
-def run_workers(worker):
-    worker.step()
+def run_workers(worker, lock):
+    worker.step(lock)
 
 
 if __name__ == "__main__":
@@ -69,9 +69,9 @@ if __name__ == "__main__":
                       max_episode_steps=max_episode_steps) for i in range(n_workers)
                ]
     processes = []
-
+    lock = mp.Lock()
     for worker in workers:
-        p = mp.Process(target=run_workers, args=(worker,))
+        p = mp.Process(target=run_workers, args=(worker, lock))
         p.daemon = True
         p.start()
         processes.append(p)

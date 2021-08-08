@@ -61,21 +61,22 @@ class Worker:
             action = dist.sample()
         return action.numpy(), values.numpy(), probs.numpy()
 
-    def sync_thread_spec_params(self):
-        self.local_model.load_state_dict(self.global_model.state_dict())
+    def sync_thread_spec_params(self, lock):
+        with lock:
+            self.local_model.load_state_dict(self.global_model.state_dict())
 
-    def soft_update_avg_network(self):
-        for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
-            avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+    def soft_update_avg_network(self, lock):
+        with lock:
+            for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
+                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
 
     @staticmethod
-    def share_grads_to_global_models(local_model, global_model):
-        for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
-            # if global_param.grad is not None:
-            #     return
-            global_param._grad = local_param.grad
+    def share_grads_to_global_models(local_model, global_model, lock):
+        with lock:
+            for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
+                global_param._grad = local_param.grad
 
-    def step(self):
+    def step(self, lock):
         print(f"Worker: {self.id} started.")
         running_reward = 0
         state = np.zeros(self.state_shape, dtype=np.uint8)
@@ -84,19 +85,18 @@ class Worker:
         next_state = None
         episode_reward = 0
         while True:
-            self.shared_optimizer.zero_grad()  # Reset global gradients
-
-            self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+            with lock:
+                self.shared_optimizer.zero_grad()  # Reset global gradients
+            self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, mus = [], [], [], [], []
-
             for step in range(1, 1 + self.k):
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
 
                 states.append(state)
-                actions.append(action)
+                actions.append(action[0])
                 rewards.append(np.sign(reward))
                 dones.append(done)
                 mus.append(mu[0])
@@ -121,46 +121,44 @@ class Worker:
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
-            self.train(states, actions, rewards, dones, mus, next_state)
+            self.train(states, actions, rewards, dones, mus, next_state, lock)
 
             n = np.random.poisson(self.replay_ratio)
             for _ in range(n):
-                self.shared_optimizer.zero_grad()  # Reset global gradients
-                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+                with lock:
+                    self.shared_optimizer.zero_grad()  # Reset global gradients
+                self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
 
-                self.train(*self.memory.sample(), on_policy=False)
+                self.train(*self.memory.sample(), lock)
 
-    def train(self, states, actions, rewards, dones, mus, next_state, on_policy=True):
+    def train(self, states, actions, rewards, dones, mus, next_state, lock):
         states = torch.ByteTensor(states)
         mus = torch.Tensor(mus)
-        actions = torch.ByteTensor(actions)
+        actions = torch.LongTensor(actions).view(-1, 1)
         next_state = torch.Tensor(next_state)
         rewards = torch.Tensor(rewards)
         dones = torch.BoolTensor(dones)
 
         dist, q_values, f = self.local_model(states)
         *_, f_avg = self.avg_model(states)
+        q_i = q_values.gather(-1, actions)
 
         with torch.no_grad():
             values = (q_values * f).sum(-1, keepdims=True)
 
-            if on_policy:
-                rho = torch.ones((self.k, self.n_actions))
-            else:
-                rho = f / (mus + 1e-6)
-            rho_i = rho.gather(-1, actions.long())
+            rho = f / (mus + 1e-6)
+            rho_i = rho.gather(-1, actions)
 
             _, next_q_value, next_mu = self.get_actions_and_qvalues(next_state)
             next_value = (next_q_value * next_mu).sum(-1)
 
-            q_ret = self.q_retrace(rewards, dones, q_values.detach().gather(-1, actions.long()),
-                                   values, next_value, rho_i)
+            q_ret = self.q_retrace(rewards, dones, q_i, values, next_value, rho_i)
 
         ent = dist.entropy().mean()
 
         # Truncated Importance Sampling:
         adv = q_ret - values
-        f_i = f.gather(-1, actions.long())
+        f_i = f.gather(-1, actions)
         logf_i = torch.log(f_i + 1e-6)
         gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
@@ -173,7 +171,7 @@ class Worker:
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = self.critic_coeff * self.mse_loss(q_ret, q_values.gather(-1, actions.long()))
+        loss_q = self.critic_coeff * self.mse_loss(q_ret, q_i)
 
         # trust region:
         g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
@@ -187,11 +185,11 @@ class Worker:
         f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 
-        self.share_grads_to_global_models(self.local_model, self.global_model)
+        self.share_grads_to_global_models(self.local_model, self.global_model, lock)
+        with lock:
+            self.shared_optimizer.step()
 
-        self.shared_optimizer.step()
-
-        self.soft_update_avg_network()
+        self.soft_update_avg_network(lock)
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
