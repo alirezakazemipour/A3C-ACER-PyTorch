@@ -5,7 +5,7 @@ import torch
 from torch import from_numpy
 from memory import Memory
 from torch.nn.functional import relu
-from torch.distributions import Independent, Normal  # -> MultivariateNormalDiag
+from torch.distributions import Normal  # -> MultivariateNormalDiag
 
 
 class Worker(torch.multiprocessing.Process):
@@ -69,10 +69,10 @@ class Worker(torch.multiprocessing.Process):
             state = np.expand_dims(state, 0)
         state = from_numpy(state).float()
         with torch.no_grad():
-            dist, mu = self.local_actor(state)
+            dist, mu, sigma = self.local_actor(state)
             action = dist.sample()
         action = np.clip(action.numpy(), *self.actions_bounds)
-        return action, mu.numpy()
+        return action, mu.numpy(), sigma.numpy()
 
     @staticmethod
     def sync_thread_spec_params(from_model, to_model):
@@ -105,9 +105,9 @@ class Worker(torch.multiprocessing.Process):
                 self.sync_thread_spec_params(self.global_actor, self.local_actor)
                 self.sync_thread_spec_params(self.global_critic, self.local_critic)
 
-            states, actions, rewards, dones, mus = [], [], [], [], []
+            states, actions, rewards, dones, mus, sigmas = [], [], [], [], [], []
             for step in range(1, 1 + self.k):
-                action, mu = self.get_action(state)
+                action, mu, sigma = self.get_action(state)
                 next_state, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
 
@@ -116,6 +116,7 @@ class Worker(torch.multiprocessing.Process):
                 rewards.append((reward + 8.1) / 8.1)
                 dones.append(done)
                 mus.append(mu[0])
+                sigmas.append(sigma[0])
 
                 episode_reward += reward
                 state = next_state
@@ -133,7 +134,7 @@ class Worker(torch.multiprocessing.Process):
                     episode_reward = 0
 
             trajectory = dict(states=states, actions=actions, rewards=rewards,
-                              dones=dones, mus=mus, next_state=next_state)
+                              dones=dones, mus=mus, sigmas=sigmas, next_state=next_state)
             self.memory.add(**trajectory)
 
             if len(self.memory) % 4 == 0:
@@ -143,16 +144,17 @@ class Worker(torch.multiprocessing.Process):
 
                 self.train(*self.memory.sample())
 
-    def train(self, states, actions, rewards, dones, mus, next_state):
+    def train(self, states, actions, rewards, dones, mus, sigmas, next_state):
         states = torch.Tensor(states)
         mus = torch.Tensor(mus)
+        sigmas = torch.Tensor(sigmas)
         actions = torch.LongTensor(actions).view(-1, self.n_actions)
         next_state = torch.Tensor(next_state).view(-1, self.n_states)
         rewards = torch.Tensor(rewards)
         dones = torch.BoolTensor(dones)
 
-        dist, _ = self.local_actor(states)
-        dist_avg, _ = self.avg_actor(states)
+        dist, *_ = self.local_actor(states)
+        dist_avg, *_ = self.avg_actor(states)
         u = [self.get_action(states.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
         u = np.hstack(u)
         q_values, values = self.local_critic(states, actions, from_numpy(u).float())
@@ -166,15 +168,12 @@ class Worker(torch.multiprocessing.Process):
         q_values_prime, _ = self.local_critic(states, actions_prime, from_numpy(u).float())
 
         with torch.no_grad():
-            rho_i = f_i / (self.compute_probs(Independent(Normal(mus, 0.3), 1), actions) + self.eps)
-            rho_i_prime = f_i_prime / (self.compute_probs(Independent(Normal(mus, 0.3), 1), actions_prime) + self.eps)
+            rho_i = f_i / (self.compute_probs(Normal(mus, sigmas), actions) + self.eps)
+            rho_i_prime = f_i_prime / (self.compute_probs(Normal(mus, sigmas), actions_prime) + self.eps)
 
             c_i = torch.min(torch.ones_like(rho_i), rho_i.pow(1 / self.n_actions))
 
-            u = [self.get_action(next_state.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
-            u = np.hstack(u)
-            next_action = self.get_action(next_state.numpy(), batch=True)[0]
-            _, next_value = self.local_critic(next_state, from_numpy(next_action).float(), from_numpy(u).float())
+            _, next_value = self.local_critic(next_state, None, None)
 
             q_ret = self.q_retrace(rewards, dones, q_values, values, next_value, c_i)
             q_opc = self.q_retrace(rewards, dones, q_values, values, next_value, torch.ones_like(c_i))
@@ -201,7 +200,7 @@ class Worker(torch.multiprocessing.Process):
         loss_q = -loss_q.mean()
 
         # # trust region:
-        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), dist.mean)[0]
+        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), (dist.mean, dist.stddev))[0]
         # k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
         # k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
         #
@@ -209,13 +208,14 @@ class Worker(torch.multiprocessing.Process):
         #                 (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
         #
         # grads_f = -(g - adj * k)
-        # dist.mean.backward(grads_f)
+
         loss_pg = policy_loss - self.ent_coeff * ent
 
         self.actor_opt.zero_grad()
         self.critic_opt.zero_grad()
 
         loss_pg.backward()
+        # dist.mean.backward(grads_f)
         loss_q.backward()
 
         a_grads = [param.grad for param in self.local_actor.parameters()]

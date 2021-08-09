@@ -2,7 +2,7 @@ from abc import ABC
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.distributions import Independent, Normal
+from torch.distributions import Normal
 
 
 class Actor(nn.Module, ABC):
@@ -15,20 +15,24 @@ class Actor(nn.Module, ABC):
 
         self.hidden = nn.Linear(self.n_states, self.n_hiddens)
         self.mu = nn.Linear(self.n_hiddens, self.n_actions)
+        self.sigma = nn.Linear(self.n_hiddens, self.n_actions)
 
         nn.init.kaiming_normal_(self.hidden.weight, nonlinearity="relu")
         self.hidden.bias.data.zero_()
         nn.init.xavier_uniform_(self.mu.weight)
         self.mu.bias.data.zero_()
+        nn.init.kaiming_normal_(self.sigma.weight, nonlinearity="relu")
+        self.sigma.bias.data.zero_()
 
     def forward(self, inputs):
         x = inputs
         x = F.relu(self.hidden(x))
         mu = torch.tanh(self.mu(x))
+        sigma = F.softplus(self.sigma(x)) + 1e-4
 
         mu = mu * self.action_bounds[1]
 
-        return Independent(Normal(mu, 0.3), 1), mu  # -> MultivariateNormalDiag = Independent(Normal)
+        return Normal(mu, sigma), mu, sigma
 
 
 class SDNCritic(nn.Module, ABC):
@@ -56,6 +60,8 @@ class SDNCritic(nn.Module, ABC):
         x = inputs
         x = F.relu(self.hidden_value(x))
         value = self.value(x)
+        if u is None:
+            return None, value
 
         x = F.relu(self.hidden_adv(torch.cat([inputs, a], dim=-1)))
         adv = self.adv(x)
