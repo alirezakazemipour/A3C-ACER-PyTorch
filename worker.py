@@ -138,10 +138,6 @@ class Worker(torch.multiprocessing.Process):
             self.memory.add(**trajectory)
 
             if len(self.memory) % 4 == 0:
-                with self.lock:
-                    self.sync_thread_spec_params(self.global_actor, self.local_actor)
-                    self.sync_thread_spec_params(self.global_critic, self.local_critic)
-
                 self.train(*self.memory.sample())
 
     def train(self, states, actions, rewards, dones, mus, sigmas, next_state):
@@ -196,26 +192,30 @@ class Worker(torch.multiprocessing.Process):
 
         policy_loss = loss_f + loss_bc
         loss_q = (q_ret - q_values.detach()) * q_values + torch.min(torch.ones_like(rho_i), rho_i) * (
-                    q_ret - q_values.detach()) * values
+                q_ret - q_values.detach()) * values
         loss_q = -loss_q.mean()
 
-        # # trust region:
-        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), (dist.mean, dist.stddev))[0]
+        # trust region:
+        g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), (dist.mean, dist.stddev))
+        k = torch.log(dist.stddev / dist_avg.stddev) - 0.5 + (dist_avg.stddev ** 2 + (dist_avg.mean - dist.mean) ** 2) / 2 / (dist.stddev ** 2)
+        k = torch.autograd.grad(k.mean(), (dist.mean, dist.stddev))
         # k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
-        # k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
-        #
-        # adj = torch.max(torch.zeros_like(k_dot_g),
-        #                 (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
-        #
-        # grads_f = -(g - adj * k)
+        grads_f = []
+        for g_, k_ in zip(g, k):
+            k_dot_g = torch.sum(k_ * g_, dim=-1, keepdim=True)
 
-        loss_pg = policy_loss - self.ent_coeff * ent
+            adj = torch.max(torch.zeros_like(k_dot_g),
+                            (k_dot_g - self.delta) / (torch.sum(k_.square(), dim=-1, keepdim=True) + self.eps))
+
+            grads_f.append(-(g_ - adj * k_))
+
+        # loss_pg = policy_loss - self.ent_coeff * ent
 
         self.actor_opt.zero_grad()
         self.critic_opt.zero_grad()
 
-        loss_pg.backward()
-        # dist.mean.backward(grads_f)
+        # loss_pg.backward()
+        torch.autograd.backward((dist.mean, dist.stddev), grads_f)
         loss_q.backward()
 
         a_grads = [param.grad for param in self.local_actor.parameters()]

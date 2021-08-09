@@ -72,4 +72,4 @@ class SDNCritic(nn.Module, ABC):
             advs.append(self.adv(x))
         advs = torch.cat(advs, dim=1)
 
-        return value + adv - advs.mean(-1, keepdims=True), value
+        return value + adv - advs.mean(-1, keepdim=True), value

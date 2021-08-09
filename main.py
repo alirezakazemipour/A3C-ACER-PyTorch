@@ -10,7 +10,7 @@ import random
 
 env_name = "Pendulum-v0"
 n_workers = 4
-lr = 7e-4
+lr = 5e-4
 gamma = 0.9
 ent_coeff = 0.0001
 n_hiddens = 256
@@ -19,7 +19,7 @@ k = 50
 c = 5
 delta = 1
 replay_ratio = 4
-polyak_coeff = 0.005
+polyak_coeff = 0.01
 n_sdn = 5
 
 
