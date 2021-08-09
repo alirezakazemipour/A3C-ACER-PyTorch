@@ -11,9 +11,9 @@ import random
 env_name = "Pendulum-v0"
 n_workers = 4
 lr = 7e-4
-gamma = 0.99
-ent_coeff = 0.001
-n_hiddens = 128
+gamma = 0.9
+ent_coeff = 0.0001
+n_hiddens = 256
 mem_size = 5000
 k = 50
 c = 5
@@ -23,8 +23,22 @@ polyak_coeff = 0.005
 n_sdn = 5
 
 
-def run_workers(worker, lock):
-    worker.step(lock)
+def update_shared_model(queue, lock, actor_opt, critic_opt, actor, critic, avg_actor):
+    while True:
+        actor_grads, critic_grads, id = queue.get()
+        # print(f"grads of worker:{id}")
+        with lock:
+            actor_opt.zero_grad()
+            critic_opt.zero_grad()
+            for a_grad, param in zip(actor_grads, actor.parameters()):
+                param._grad = a_grad
+            for c_grad, param in zip(critic_grads, critic.parameters()):
+                param._grad = c_grad
+
+            actor_opt.step()
+            critic_opt.step()
+            for avg_param, global_param in zip(avg_actor.parameters(), actor.parameters()):
+                avg_param.data.copy_(polyak_coeff * global_param.data + (1 - polyak_coeff) * avg_param.data)
 
 
 if __name__ == "__main__":
@@ -65,6 +79,14 @@ if __name__ == "__main__":
     for p in avg_actor.parameters():
         p.requires_grad = False
 
+    grad_updates_queue = mp.Queue()
+    lock = mp.Lock()
+
+    optimizer_worker = mp.Process(target=update_shared_model,
+                                  args=(grad_updates_queue, lock, shared_actor_opt,
+                                        shared_critic_opt, global_actor, global_critic, avg_actor))
+    optimizer_worker.start()
+
     workers = [Worker(id=i,
                       n_states=n_states,
                       n_actions=n_actions,
@@ -74,8 +96,7 @@ if __name__ == "__main__":
                       global_actor=global_actor,
                       avg_actor=avg_actor,
                       global_critic=global_critic,
-                      shared_actor_optimizer=shared_actor_opt,
-                      shared_critic_optimizer=shared_critic_opt,
+                      queue=grad_updates_queue,
                       gamma=gamma,
                       ent_coeff=ent_coeff,
                       mem_size=mem_size,
@@ -84,16 +105,12 @@ if __name__ == "__main__":
                       n_sdn=n_sdn,
                       delta=delta,
                       replay_ratio=replay_ratio,
-                      polyak_coeff=polyak_coeff) for i in range(n_workers)
-               ]
-    processes = []
+                      lock=lock) for i in range(n_workers)]
 
-    lock = mp.Lock()
+    processes = []
     for worker in workers:
-        p = mp.Process(target=run_workers, args=(worker, lock))
-        p.daemon = True
-        p.start()
-        processes.append(p)
+        worker.start()
+        processes.append(worker)
 
     for p in processes:
         p.join()

@@ -8,7 +8,7 @@ from torch.nn.functional import relu
 from torch.distributions import Independent, Normal  # -> MultivariateNormalDiag
 
 
-class Worker:
+class Worker(torch.multiprocessing.Process):
     def __init__(self,
                  id,
                  n_states,
@@ -19,8 +19,7 @@ class Worker:
                  global_actor,
                  avg_actor,
                  global_critic,
-                 shared_actor_optimizer,
-                 shared_critic_optimizer,
+                 queue,
                  gamma,
                  ent_coeff,
                  mem_size,
@@ -29,7 +28,8 @@ class Worker:
                  n_sdn,
                  delta,
                  replay_ratio,
-                 polyak_coeff):
+                 lock):
+        super(Worker, self).__init__()
         self.id = id
         self.n_states = n_states
         self.n_actions = n_actions
@@ -44,7 +44,6 @@ class Worker:
         self.n_sdn = n_sdn
         self.delta = delta
         self.replay_ratio = replay_ratio
-        self.polyak_coeff = polyak_coeff
         self.memory = Memory(self.mem_size)
         self.env = gym.make(self.env_name)
         self.env.seed(self.id + 1)
@@ -52,11 +51,14 @@ class Worker:
         self.local_actor = Actor(self.n_states, self.n_actions, self.n_hiddens * 2)
         self.local_critic = SDNCritic(self.n_states, self.n_actions)
 
+        self.actor_opt = torch.optim.Adam(self.local_actor.parameters(), lr=0)
+        self.critic_opt = torch.optim.Adam(self.local_critic.parameters(), lr=0)
+
         self.global_actor = global_actor
         self.avg_actor = avg_actor
         self.global_critic = global_critic
-        self.shared_actor_optimizer = shared_actor_optimizer
-        self.shared_critic_optimizer = shared_critic_optimizer
+        self.queue = queue
+        self.lock = lock
 
         self.mse_loss = torch.nn.MSELoss()
         self.episode = 0
@@ -72,19 +74,10 @@ class Worker:
         action = np.clip(action.numpy(), *self.actions_bounds)
         return action, mu.numpy()
 
-    def sync_thread_spec_params(self, lock):
-        with lock:
-            self.local_actor.load_state_dict(self.global_actor.state_dict())
-            self.local_critic.load_state_dict(self.global_critic.state_dict())
-
     @staticmethod
-    def share_grads_to_global_models(local_model, global_model, lock):
-        with lock:
-            for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
-                # if global_param.grad is not None:
-                #     return
-
-                global_param._grad = local_param.grad
+    def sync_thread_spec_params(from_model, to_model):
+        for to_model, from_model in zip(to_model.parameters(), from_model.parameters()):
+            to_model.data.copy_(from_model.data)
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q = next_value
@@ -96,27 +89,21 @@ class Worker:
 
         return torch.cat(q_returns).view(-1, 1)
 
-    def soft_update_avg_network(self, lock):
-        with lock:
-            for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
-                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
-
     @staticmethod
     def compute_probs(dist, actions):
         return dist.log_prob(actions).exp().view(-1, 1)
 
-    def step(self, lock):
+    def run(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
         state = self.env.reset()
         next_state = None
         episode_reward = 0
-        lock = lock
         while True:
-            with lock:
-                self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-                self.shared_critic_optimizer.zero_grad()
-            self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
+            with self.lock:
+                # Synchronize thread-specific parameters
+                self.sync_thread_spec_params(self.global_actor, self.local_actor)
+                self.sync_thread_spec_params(self.global_critic, self.local_critic)
 
             states, actions, rewards, dones, mus = [], [], [], [], []
             for step in range(1, 1 + self.k):
@@ -150,17 +137,16 @@ class Worker:
             self.memory.add(**trajectory)
 
             if len(self.memory) % 4 == 0:
-                with lock:
-                    self.shared_actor_optimizer.zero_grad()  # Reset global gradients
-                    self.shared_critic_optimizer.zero_grad()
-                self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
+                with self.lock:
+                    self.sync_thread_spec_params(self.global_actor, self.local_actor)
+                    self.sync_thread_spec_params(self.global_critic, self.local_critic)
 
-                self.train(*self.memory.sample(), lock)
+                self.train(*self.memory.sample())
 
-    def train(self, states, actions, rewards, dones, mus, next_state, lock):
+    def train(self, states, actions, rewards, dones, mus, next_state):
         states = torch.Tensor(states)
         mus = torch.Tensor(mus)
-        actions = torch.LongTensor(actions).view(-1, 1)
+        actions = torch.LongTensor(actions).view(-1, self.n_actions)
         next_state = torch.Tensor(next_state).view(-1, self.n_states)
         rewards = torch.Tensor(rewards)
         dones = torch.BoolTensor(dones)
@@ -223,15 +209,16 @@ class Worker:
         #
         # grads_f = -(g - adj * k)
         # dist.mean.backward(grads_f)
-        loss = policy_loss - self.ent_coeff * ent
-        loss.backward()
+        loss_pg = policy_loss - self.ent_coeff * ent
+
+        self.actor_opt.zero_grad()
+        self.critic_opt.zero_grad()
+
+        loss_pg.backward()
         loss_q.backward()
 
-        self.share_grads_to_global_models(self.local_actor, self.global_actor, lock)
-        self.share_grads_to_global_models(self.local_critic, self.global_critic, lock)
+        a_grads = [param.grad for param in self.local_actor.parameters()]
+        c_grads = [param.grad for param in self.local_critic.parameters()]
 
-        with lock:
-            self.shared_actor_optimizer.step()
-            self.shared_critic_optimizer.step()
+        self.queue.put((a_grads, c_grads, self.id))
 
-        self.soft_update_avg_network(lock)
