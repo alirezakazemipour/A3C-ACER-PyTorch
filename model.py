@@ -24,7 +24,9 @@ class Actor(nn.Module, ABC):
     def forward(self, inputs):
         x = inputs
         x = F.relu(self.hidden(x))
-        mu = self.mu(x)
+        mu = torch.tanh(self.mu(x))
+
+        mu = mu * self.action_bounds[1]
 
         return Independent(Normal(mu, 0.3), 1), mu  # -> MultivariateNormalDiag = Independent(Normal)
 

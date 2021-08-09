@@ -61,7 +61,7 @@ if __name__ == "__main__":
           f"n_actions: {n_actions}\n"
           f"n_workers: {n_workers}\n")
 
-    global_actor = Actor(n_states, n_actions, n_hiddens * 2)
+    global_actor = Actor(n_states, n_actions, actions_bounds, n_hiddens)
     global_actor.share_memory()
 
     global_critic = SDNCritic(n_states, n_actions)
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr)
     shared_critic_opt.share_memory()
 
-    avg_actor = Actor(n_states, n_actions, n_hiddens * 2)
+    avg_actor = Actor(n_states, n_actions, actions_bounds, n_hiddens)
     avg_actor.load_state_dict(global_actor.state_dict())
     avg_actor.share_memory()
     for p in avg_actor.parameters():

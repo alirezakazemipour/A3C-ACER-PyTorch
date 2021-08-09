@@ -48,7 +48,7 @@ class Worker(torch.multiprocessing.Process):
         self.env = gym.make(self.env_name)
         self.env.seed(self.id + 1)
 
-        self.local_actor = Actor(self.n_states, self.n_actions, self.n_hiddens * 2)
+        self.local_actor = Actor(self.n_states, self.n_actions, self.actions_bounds, self.n_hiddens)
         self.local_critic = SDNCritic(self.n_states, self.n_actions)
 
         self.actor_opt = torch.optim.Adam(self.local_actor.parameters(), lr=0)
@@ -113,7 +113,7 @@ class Worker(torch.multiprocessing.Process):
 
                 states.append(state)
                 actions.append(action[0])
-                rewards.append(reward / 8 + 1)
+                rewards.append((reward + 8.1) / 8.1)
                 dones.append(done)
                 mus.append(mu[0])
 
@@ -196,7 +196,8 @@ class Worker(torch.multiprocessing.Process):
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = (q_ret - q_values) * q_values + torch.min(torch.ones_like(rho_i), rho_i) * (q_ret - q_values) * values
+        loss_q = (q_ret - q_values.detach()) * q_values + torch.min(torch.ones_like(rho_i), rho_i) * (
+                    q_ret - q_values.detach()) * values
         loss_q = -loss_q.mean()
 
         # # trust region:
@@ -221,4 +222,3 @@ class Worker(torch.multiprocessing.Process):
         c_grads = [param.grad for param in self.local_critic.parameters()]
 
         self.queue.put((a_grads, c_grads, self.id))
-
