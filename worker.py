@@ -196,13 +196,13 @@ class Worker:
         ent = dist.entropy().mean()
 
         # Truncated Importance Sampling:
-        adv = q_opc - values
+        adv = q_opc - values.detach()
         logf_i = torch.log(f_i + self.eps)
         gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
-        adv_bc = q_values_prime.detach() - values
+        adv_bc = q_values_prime.detach() - values.detach()
 
         logf_bc = torch.log(f_i_prime + self.eps)
 
@@ -214,17 +214,17 @@ class Worker:
         loss_q = -loss_q.mean()
 
         # # trust region:
-        g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), dist.mean)[0]
-        k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
-        k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
-
-        adj = torch.max(torch.zeros_like(k_dot_g),
-                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
-
-        grads_f = -(g - adj * k)
-        dist.mean.backward(grads_f)
-        # loss = policy_loss - self.ent_coeff * ent
-        # loss.backward()
+        # g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), dist.mean)[0]
+        # k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
+        # k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
+        #
+        # adj = torch.max(torch.zeros_like(k_dot_g),
+        #                 (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
+        #
+        # grads_f = -(g - adj * k)
+        # dist.mean.backward(grads_f)
+        loss = policy_loss - self.ent_coeff * ent
+        loss.backward()
         loss_q.backward()
 
         self.share_grads_to_global_models(self.local_actor, self.global_actor, lock)
