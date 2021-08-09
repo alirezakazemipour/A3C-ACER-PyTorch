@@ -9,7 +9,7 @@ import numpy as np
 import random
 
 env_name = "Pendulum-v0"
-n_workers = 2
+n_workers = 4
 lr = 7e-4
 gamma = 0.99
 ent_coeff = 0.001

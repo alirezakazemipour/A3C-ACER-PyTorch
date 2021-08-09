@@ -72,13 +72,6 @@ class Worker:
         action = np.clip(action.numpy(), *self.actions_bounds)
         return action, mu.numpy()
 
-    def get_value(self, state):
-        state = np.expand_dims(state, 0)
-        state = from_numpy(state).float()
-        with torch.no_grad():
-            q_value, value = self.local_critic(state)
-        return q_value.numpy(), value.numpy()
-
     def sync_thread_spec_params(self, lock):
         with lock:
             self.local_actor.load_state_dict(self.global_actor.state_dict())
@@ -133,7 +126,7 @@ class Worker:
 
                 states.append(state)
                 actions.append(action[0])
-                rewards.append(reward)
+                rewards.append(reward / 8 + 1)
                 dones.append(done)
                 mus.append(mu[0])
 
@@ -168,7 +161,7 @@ class Worker:
         states = torch.Tensor(states)
         mus = torch.Tensor(mus)
         actions = torch.LongTensor(actions).view(-1, 1)
-        next_state = torch.Tensor(next_state)
+        next_state = torch.Tensor(next_state).view(-1, self.n_states)
         rewards = torch.Tensor(rewards)
         dones = torch.BoolTensor(dones)
 
@@ -192,7 +185,10 @@ class Worker:
 
             c_i = torch.min(torch.ones_like(rho_i), rho_i.pow(1 / self.n_actions))
 
-            _, next_value = self.get_value(next_state)
+            u = [self.get_action(next_state.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
+            u = np.hstack(u)
+            next_action = self.get_action(next_state.numpy(), batch=True)[0]
+            _, next_value = self.local_critic(next_state, from_numpy(next_action).float(), from_numpy(u).float())
 
             q_ret = self.q_retrace(rewards, dones, q_values, values, next_value, c_i)
             q_opc = self.q_retrace(rewards, dones, q_values, values, next_value, torch.ones_like(c_i))
@@ -208,8 +204,9 @@ class Worker:
         # Bias correction for the truncation
         adv_bc = q_values_prime.detach() - values
 
-        logf_bc = torch.log(f_i_prime + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho_i_prime + self.eps)), dim=-1)
+        logf_bc = torch.log(f_i_prime + self.eps)
+
+        gain_bc = logf_bc * adv_bc * relu(1 - self.c / (rho_i_prime + self.eps))
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
@@ -218,11 +215,11 @@ class Worker:
 
         # # trust region:
         g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), dist.mean)[0]
-        k = -dist_avg.cdf(actions) / (f_i_prime.detach() + 1e-6)
+        k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g),
-                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
+                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
 
         grads_f = -(g - adj * k)
         dist.mean.backward(grads_f)
