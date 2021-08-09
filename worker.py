@@ -5,7 +5,7 @@ import torch
 from torch import from_numpy
 from memory import Memory
 from torch.nn.functional import relu
-from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions import Independent, Normal  # -> MultivariateNormalDiag
 
 
 class Worker:
@@ -108,6 +108,10 @@ class Worker:
             for avg_param, global_param in zip(self.avg_actor.parameters(), self.global_actor.parameters()):
                 avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
 
+    @staticmethod
+    def compute_probs(dist, actions):
+        return dist.log_prob(actions).exp().view(-1, 1)
+
     def step(self, lock):
         print(f"Worker: {self.id} started.")
         running_reward = 0
@@ -171,21 +175,20 @@ class Worker:
         dist, _ = self.local_actor(states)
         dist_avg, _ = self.avg_actor(states)
         u = [self.get_action(states.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
-        u = from_numpy(np.hstack(u).reshape((-1, 1, self.n_sdn))).float()
-        
-        q_values, values = self.local_critic(states, actions, u)
+        u = np.hstack(u)
+        q_values, values = self.local_critic(states, actions, from_numpy(u).float())
 
-        f_i = dist.cdf(actions)
+        f_i = self.compute_probs(dist, actions)
         actions_prime = dist.sample()
-        f_i_prime = dist.cdf(actions_prime)
+        f_i_prime = self.compute_probs(dist, actions_prime)
 
-        u = torch.stack(torch.Tensor([self.get_action(states.numpy(), batch=True) for _ in range(self.n_sdn)]), dim=2)
-        q_values_prime, _ = self.local_critic(states, actions_prime, u)
+        u = [self.get_action(states.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
+        u = np.hstack(u)
+        q_values_prime, _ = self.local_critic(states, actions_prime, from_numpy(u).float())
 
         with torch.no_grad():
-            rho_i = f_i / (MultivariateNormal(mus, 0.3 * torch.eye(mus.size())).cdf(actions) + self.eps)
-            rho_i_prime = f_i_prime / (
-                        MultivariateNormal(mus, 0.3 * torch.eye(mus.size())).cdf(actions_prime) + self.eps)
+            rho_i = f_i / (self.compute_probs(Independent(Normal(mus, 0.3), 1), actions) + self.eps)
+            rho_i_prime = f_i_prime / (self.compute_probs(Independent(Normal(mus, 0.3), 1), actions_prime) + self.eps)
 
             c_i = torch.min(torch.ones_like(rho_i), rho_i.pow(1 / self.n_actions))
 

@@ -2,7 +2,7 @@ from abc import ABC
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions import Independent, Normal
 
 
 class Actor(nn.Module, ABC):
@@ -25,9 +25,8 @@ class Actor(nn.Module, ABC):
         x = inputs
         x = F.relu(self.hidden(x))
         mu = self.mu(x)
-        # mu = mu * self.action_bounds[1]
 
-        return MultivariateNormal(mu, 0.3 * torch.eye(mu.size(1))), mu
+        return Independent(Normal(mu, 0.3), 1), mu  # -> MultivariateNormalDiag = Independent(Normal)
 
 
 class SDNCritic(nn.Module, ABC):
@@ -59,7 +58,10 @@ class SDNCritic(nn.Module, ABC):
         x = F.relu(self.hidden_adv(torch.cat([inputs, a], dim=-1)))
         adv = self.adv(x)
 
-        x = F.relu(self.hidden_adv(torch.cat([inputs.view(-1, self.n_states, 1), u], dim=1)))
-        adv_mean = self.adv(x).mean(1, keepdim=True)
+        advs = []
+        for i in range(u.size(-1)):
+            x = F.relu(self.hidden_adv(torch.cat([inputs, u[:, i].view(-1, 1)], dim=-1)))
+            advs.append(self.adv(x))
+        advs = torch.cat(advs, dim=1)
 
-        return value + adv - adv_mean, value
+        return value + adv - advs.mean(-1, keepdims=True), value
