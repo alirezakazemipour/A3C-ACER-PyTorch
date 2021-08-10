@@ -19,7 +19,7 @@ k = 50
 c = 5
 delta = 1
 replay_ratio = 4
-polyak_coeff = 0.01
+polyak_coeff = 0.005
 n_sdn = 5
 
 

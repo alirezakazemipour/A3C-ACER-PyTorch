@@ -5,7 +5,7 @@ import torch
 from torch import from_numpy
 from memory import Memory
 from torch.nn.functional import relu
-from torch.distributions import Normal  # -> MultivariateNormalDiag
+from torch.distributions import Normal, kl_divergence  # -> MultivariateNormalDiag
 
 
 class Worker(torch.multiprocessing.Process):
@@ -64,9 +64,8 @@ class Worker(torch.multiprocessing.Process):
         self.episode = 0
         self.eps = 1e-6
 
-    def get_action(self, state, batch=False):
-        if not batch:
-            state = np.expand_dims(state, 0)
+    def get_action(self, state):
+        state = np.expand_dims(state, 0)
         state = from_numpy(state).float()
         with torch.no_grad():
             dist, mu, sigma = self.local_actor(state)
@@ -151,17 +150,17 @@ class Worker(torch.multiprocessing.Process):
 
         dist, *_ = self.local_actor(states)
         dist_avg, *_ = self.avg_actor(states)
-        u = [self.get_action(states.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
-        u = np.hstack(u)
-        q_values, values = self.local_critic(states, actions, from_numpy(u).float())
+        u = [dist.sample() for _ in range(self.n_sdn)]
+        u = torch.cat(u, dim=-1)
+        q_values, values = self.local_critic(states, actions, u)
 
         f_i = self.compute_probs(dist, actions)
         actions_prime = dist.sample()
         f_i_prime = self.compute_probs(dist, actions_prime)
 
-        u = [self.get_action(states.numpy(), batch=True)[0] for _ in range(self.n_sdn)]
-        u = np.hstack(u)
-        q_values_prime, _ = self.local_critic(states, actions_prime, from_numpy(u).float())
+        u = [dist.sample() for _ in range(self.n_sdn)]
+        u = torch.cat(u, dim=-1)
+        q_values_prime, _ = self.local_critic(states, actions_prime, u)
 
         with torch.no_grad():
             rho_i = f_i / (self.compute_probs(Normal(mus, sigmas), actions) + self.eps)
@@ -197,6 +196,7 @@ class Worker(torch.multiprocessing.Process):
 
         # trust region:
         g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), (dist.mean, dist.stddev))
+        # k = kl_divergence(dist_avg, dist)
         k = torch.log(dist.stddev / dist_avg.stddev) - 0.5 + (dist_avg.stddev ** 2 + (dist_avg.mean - dist.mean) ** 2) / 2 / (dist.stddev ** 2)
         k = torch.autograd.grad(k.mean(), (dist.mean, dist.stddev))
         # k = -self.compute_probs(dist_avg, actions) / (f_i_prime.detach() + self.eps)
@@ -215,6 +215,7 @@ class Worker(torch.multiprocessing.Process):
         self.critic_opt.zero_grad()
 
         # loss_pg.backward()
+        # grads_f = torch.cat(grads_f, dim=-1)
         torch.autograd.backward((dist.mean, dist.stddev), grads_f)
         loss_q.backward()
 
