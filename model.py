@@ -68,7 +68,7 @@ class SDNCritic(nn.Module, ABC):
 
         advs = []
         for i in range(u.size(-1)):
-            x = F.relu(self.hidden_adv(torch.cat([inputs, u[:, i].view(-1, 1)], dim=-1)))
+            x = F.relu(self.hidden_adv(torch.cat([inputs, u[..., i].view(inputs.size(0), self.n_actions)], dim=-1)))
             advs.append(self.adv(x))
         advs = torch.cat(advs, dim=1)
 

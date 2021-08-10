@@ -81,6 +81,10 @@ class Worker(torch.multiprocessing.Process):
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q = next_value
         q_returns = []
+        # print(q_values.shape)
+        # print(values.shape)
+        # print(rho_i.mean(-1).shape)
+        rho_i = rho_i.mean(-1)
         for i in reversed(range(self.k)):
             q = rewards[i] + self.gamma * (~dones[i]) * q
             q_returns.insert(0, q)
@@ -90,7 +94,7 @@ class Worker(torch.multiprocessing.Process):
 
     @staticmethod
     def compute_probs(dist, actions):
-        return dist.log_prob(actions).exp().view(-1, 1)
+        return dist.log_prob(actions).exp()
 
     def run(self):
         print(f"Worker: {self.id} started.")
@@ -112,7 +116,7 @@ class Worker(torch.multiprocessing.Process):
 
                 states.append(state)
                 actions.append(action[0])
-                rewards.append((reward + 8.1) / 8.1)
+                rewards.append(reward)
                 dones.append(done)
                 mus.append(mu[0])
                 sigmas.append(sigma[0])
@@ -151,7 +155,7 @@ class Worker(torch.multiprocessing.Process):
         dist, *_ = self.local_actor(states)
         dist_avg, *_ = self.avg_actor(states)
         u = [dist.sample() for _ in range(self.n_sdn)]
-        u = torch.cat(u, dim=-1)
+        u = torch.stack(u, dim=-1)
         q_values, values = self.local_critic(states, actions, u)
 
         f_i = self.compute_probs(dist, actions)
@@ -159,7 +163,7 @@ class Worker(torch.multiprocessing.Process):
         f_i_prime = self.compute_probs(dist, actions_prime)
 
         u = [dist.sample() for _ in range(self.n_sdn)]
-        u = torch.cat(u, dim=-1)
+        u = torch.stack(u, dim=-1)
         q_values_prime, _ = self.local_critic(states, actions_prime, u)
 
         with torch.no_grad():
@@ -178,6 +182,9 @@ class Worker(torch.multiprocessing.Process):
         # Truncated Importance Sampling:
         adv = q_opc - values.detach()
         logf_i = torch.log(f_i + self.eps)
+        # print(logf_i.shape)
+        # print(adv.shape)
+        # print(rho_i.shape)
         gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
