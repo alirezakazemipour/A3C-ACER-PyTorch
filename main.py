@@ -7,19 +7,17 @@ import os
 import torch
 import numpy as np
 import random
-import mujoco_py
 
-env_name = "Walker2d-v2"
+env_name = "Pendulum-v0"
 n_workers = 4
-lr = 5e-4
-gamma = 0.99
+lr = 1e-4
+gamma = 0.9
 ent_coeff = 0.0001
 n_hiddens = 256
 mem_size = 5000
 k = 50
 c = 5
 delta = 1
-replay_ratio = 4
 polyak_coeff = 0.005
 n_sdn = 5
 
@@ -105,7 +103,6 @@ if __name__ == "__main__":
                       c=c,
                       n_sdn=n_sdn,
                       delta=delta,
-                      replay_ratio=replay_ratio,
                       lock=lock) for i in range(n_workers)]
 
     processes = []

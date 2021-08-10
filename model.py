@@ -2,7 +2,7 @@ from abc import ABC
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.distributions import Normal
+from torch.distributions import MultivariateNormal
 
 
 class Actor(nn.Module, ABC):
@@ -27,12 +27,9 @@ class Actor(nn.Module, ABC):
     def forward(self, inputs):
         x = inputs
         x = F.relu(self.hidden(x))
-        mu = torch.tanh(self.mu(x))
-        sigma = F.softplus(self.sigma(x)) + 1e-4
+        mu = self.mu(x)
 
-        mu = mu * self.action_bounds[1]
-
-        return Normal(mu, sigma), mu, sigma
+        return MultivariateNormal(mu, scale_tril=torch.diag(0.3 * torch.ones(mu.size(-1)))), mu
 
 
 class SDNCritic(nn.Module, ABC):
