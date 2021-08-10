@@ -8,7 +8,7 @@ from atari_wrappers import make_atari
 from utils import make_state
 
 
-class Worker:
+class Worker(torch.multiprocessing.Process):
     def __init__(self,
                  id,
                  state_shape,
@@ -26,7 +26,10 @@ class Worker:
                  replay_ratio,
                  polyak_coeff,
                  critic_coeff,
-                 max_episode_steps):
+                 max_episode_steps,
+                 lock,
+                 queue):
+        super(Worker, self).__init__()
         self.id = id
         self.state_shape = state_shape
         self.n_actions = n_actions
@@ -49,6 +52,8 @@ class Worker:
         self.global_model = global_model
         self.avg_model = avg_model
         self.shared_optimizer = shared_optimizer
+        self.lock = lock
+        self.queue = queue
 
         self.mse_loss = torch.nn.MSELoss()
         self.ep = 0
@@ -61,22 +66,10 @@ class Worker:
             action = dist.sample()
         return action.numpy(), values.numpy(), probs.numpy()
 
-    def sync_thread_spec_params(self, lock):
-        with lock:
-            self.local_model.load_state_dict(self.global_model.state_dict())
+    def sync_thread_spec_params(self):
+        self.local_model.load_state_dict(self.global_model.state_dict())
 
-    def soft_update_avg_network(self, lock):
-        with lock:
-            for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
-                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
-
-    @staticmethod
-    def share_grads_to_global_models(local_model, global_model, lock):
-        with lock:
-            for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
-                global_param._grad = local_param.grad
-
-    def step(self, lock):
+    def run(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
         state = np.zeros(self.state_shape, dtype=np.uint8)
@@ -85,9 +78,8 @@ class Worker:
         next_state = None
         episode_reward = 0
         while True:
-            with lock:
-                self.shared_optimizer.zero_grad()  # Reset global gradients
-            self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
+            with self.lock:
+                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, mus = [], [], [], [], []
             for step in range(1, 1 + self.k):
@@ -121,17 +113,16 @@ class Worker:
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
-            self.train(states, actions, rewards, dones, mus, next_state, lock)
+            self.train(states, actions, rewards, dones, mus, next_state)
 
             n = np.random.poisson(self.replay_ratio)
             for _ in range(n):
-                with lock:
-                    self.shared_optimizer.zero_grad()  # Reset global gradients
-                self.sync_thread_spec_params(lock)  # Synchronize thread-specific parameters
+                with self.lock:
+                    self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-                self.train(*self.memory.sample(), lock)
+                self.train(*self.memory.sample())
 
-    def train(self, states, actions, rewards, dones, mus, next_state, lock):
+    def train(self, states, actions, rewards, dones, mus, next_state):
         states = torch.ByteTensor(states)
         mus = torch.Tensor(mus)
         actions = torch.LongTensor(actions).view(-1, 1)
@@ -174,22 +165,20 @@ class Worker:
         loss_q = self.critic_coeff * self.mse_loss(q_ret, q_i)
 
         # trust region:
-        g = torch.autograd.grad(- (policy_loss - self.ent_coeff * ent), f)[0]
-        k = - f_avg / (f.detach() + 1e-6)
+        g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), f)[0]
+        k = -f_avg / (f.detach() + 1e-6)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g),
                         (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
 
-        grads_f = - (g - adj * k)
+        grads_f = -(g - adj * k)
         f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 
-        self.share_grads_to_global_models(self.local_model, self.global_model, lock)
-        with lock:
-            self.shared_optimizer.step()
+        grads = [param.grad for param in self.local_model.parameters()]
 
-        self.soft_update_avg_network(lock)
+        self.queue.put((grads, self.id))
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
