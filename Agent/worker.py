@@ -19,9 +19,13 @@ class Worker(torch.multiprocessing.Process):
         super(Worker, self).__init__()
         self.id = id
         self.config = config
-        self.memory = Memory(self.config["mem_size"])
-        self.env = make_atari(self.config["env_name"])
+        self.memory = Memory(self.config["mem_size"], seed=self.config["seed"])
+        self.env = make_atari(self.config["env_name"], seed=self.config["seed"])
+        self.tau = self.config["polyak_coeff"]
 
+        np.random.seed(self.config["seed"])
+
+        torch.manual_seed(self.config["seed"])
         self.local_model = Model(self.config["state_shape"], self.config["n_actions"])
 
         self.global_model = global_model
@@ -50,12 +54,12 @@ class Worker(torch.multiprocessing.Process):
 
             self.shared_optimizer.step()
             for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
-                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+                avg_param.data.copy_(self.tau * global_param.data + (1 - self.tau) * avg_param.data)
 
     def run(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
-        state = np.zeros(self.state_shape, dtype=np.uint8)
+        state = np.zeros(self.config["state_shape"], dtype=np.uint8)
         obs = self.env.reset()
         state = make_state(state, obs, True)
         next_state = None
@@ -65,7 +69,7 @@ class Worker(torch.multiprocessing.Process):
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, mus = [], [], [], [], []
-            for step in range(1, 1 + self.k):
+            for step in range(1, 1 + self.config["k"]):
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
@@ -84,13 +88,13 @@ class Worker(torch.multiprocessing.Process):
                     obs = self.env.reset()
                     state = make_state(state, obs, True)
 
-                    self.ep += 1
-                    if self.ep == 1:
+                    self.episode += 1
+                    if self.episode == 1:
                         running_reward = episode_reward
                     else:
                         running_reward = 0.99 * running_reward + 0.01 * episode_reward
 
-                    print(f"\nW{self.id}| Ep {self.ep}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
+                    print(f"\nW{self.id}| Ep {self.episode}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
                     episode_reward = 0
 
             trajectory = dict(states=states, actions=actions, rewards=rewards,
@@ -98,7 +102,7 @@ class Worker(torch.multiprocessing.Process):
             self.memory.add(**trajectory)
             self.train(states, actions, rewards, dones, mus, next_state)
 
-            n = np.random.poisson(self.replay_ratio)
+            n = np.random.poisson(self.config["replay_ratio"])
             for _ in range(n):
                 self.shared_optimizer.zero_grad()
                 self.sync_thread_spec_params()  # Synchronize thread-specific parameters
@@ -134,26 +138,26 @@ class Worker(torch.multiprocessing.Process):
         adv = q_ret - values
         f_i = f.gather(-1, actions)
         logf_i = torch.log(f_i + 1e-6)
-        gain_f = logf_i * adv * torch.min(self.c * torch.ones_like(rho_i), rho_i)
+        gain_f = logf_i * adv * torch.min(self.config["c"] * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
         adv_bc = q_values.detach() - values
 
         logf_bc = torch.log(f + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.c / (rho + 1e-6)) * f.detach(), dim=-1)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.config["c"] / (rho + 1e-6)) * f.detach(), dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
-        loss_q = self.critic_coeff * self.mse_loss(q_ret, q_i)
+        loss_q = self.config["critic_loss_coeff"] * self.mse_loss(q_ret, q_i)
 
         # trust region:
-        g = torch.autograd.grad(-(policy_loss - self.ent_coeff * ent), f)[0]
+        g = torch.autograd.grad(-(policy_loss - self.config["ent_coeff"] * ent), f)[0]
         k = -f_avg / (f.detach() + 1e-6)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g),
-                        (k_dot_g - self.delta) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
+                        (k_dot_g - self.config["delta"]) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
 
         grads_f = -(g - adj * k)
         f.backward(grads_f, retain_graph=True)
@@ -166,8 +170,8 @@ class Worker(torch.multiprocessing.Process):
         q_ret = next_value
         q_returns = []
         rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
-        for i in reversed(range(self.k)):
-            q_ret = rewards[i] + self.gamma * (~dones[i]) * q_ret
+        for i in reversed(range(self.config["k"])):
+            q_ret = rewards[i] + self.config["gamma"] * (~dones[i]) * q_ret
             q_returns.insert(0, q_ret)
             q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
 

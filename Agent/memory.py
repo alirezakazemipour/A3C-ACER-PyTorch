@@ -3,8 +3,9 @@ import numpy as np
 
 
 class Memory:
-    def __init__(self, memory_size):
+    def __init__(self, memory_size, seed):
         self.memory_size = memory_size
+        np.random.seed(seed)
         self.state_buffer = deque(maxlen=self.memory_size)
         self.action_buffer = deque(maxlen=self.memory_size)
         self.reward_buffer = deque(maxlen=self.memory_size)
