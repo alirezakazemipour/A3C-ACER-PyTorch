@@ -1,53 +1,28 @@
-from model import Model
+from NN import Model
 import numpy as np
 import torch
 from torch import from_numpy
-from memory import Memory
+from .memory import Memory
 from torch.nn.functional import relu
-from utils import make_state
-from atari_wrappers import make_atari
+from Utils import make_state, make_atari
 
 
 class Worker(torch.multiprocessing.Process):
     def __init__(self,
                  id,
-                 state_shape,
-                 n_actions,
-                 env_name,
                  global_model,
                  avg_model,
                  shared_optimizer,
-                 gamma,
-                 ent_coeff,
-                 mem_size,
-                 k,
-                 c,
-                 delta,
-                 replay_ratio,
-                 polyak_coeff,
-                 critic_coeff,
-                 max_episode_steps,
-                 lock
+                 lock,
+                 **config
                  ):
         super(Worker, self).__init__()
         self.id = id
-        self.state_shape = state_shape
-        self.n_actions = n_actions
-        self.gamma = gamma
-        self.ent_coeff = ent_coeff
-        self.env_name = env_name
-        self.mem_size = mem_size
-        self.k = k
-        self.c = c
-        self.delta = delta
-        self.replay_ratio = replay_ratio
-        self.polyak_coeff = polyak_coeff
-        self.critic_coeff = critic_coeff
-        self.max_episode_steps = max_episode_steps
-        self.memory = Memory(self.mem_size)
-        self.env = make_atari(self.env_name)
+        self.config = config
+        self.memory = Memory(self.config["mem_size"])
+        self.env = make_atari(self.config["env_name"])
 
-        self.local_model = Model(self.state_shape, self.n_actions)
+        self.local_model = Model(self.config["state_shape"], self.config["n_actions"])
 
         self.global_model = global_model
         self.avg_model = avg_model
@@ -55,15 +30,15 @@ class Worker(torch.multiprocessing.Process):
         self.lock = lock
 
         self.mse_loss = torch.nn.MSELoss()
-        self.ep = 0
+        self.episode = 0
 
     def get_actions_and_qvalues(self, state):
         state = np.expand_dims(state, 0)
         state = from_numpy(state).byte()
         with torch.no_grad():
-            dist, values, probs = self.local_model(state)
+            dist, q_values, probs = self.local_model(state)
             action = dist.sample()
-        return action.numpy(), values.numpy(), probs.numpy()
+        return action.numpy(), q_values.numpy(), probs.numpy()
 
     def sync_thread_spec_params(self):
         self.local_model.load_state_dict(self.global_model.state_dict())
