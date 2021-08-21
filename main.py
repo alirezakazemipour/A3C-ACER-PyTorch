@@ -17,8 +17,8 @@ if __name__ == "__main__":
     with open("training_configs.yml") as f:
         params = yaml.load(f.read(), Loader=yaml.FullLoader)
 
-    params.update({"n_workers": os.cpu_count()})
-    params.update({"mem_size": params["total_memory_size"] // params["n_workers"] // params["k"]})
+    params.update({"n_workers": 2})
+    params.update({"mem_size": int(params["total_memory_size"]) // params["n_workers"] // params["k"]})
     if not isinstance(params["state_shape"], tuple):
         params["state_shape"] = tuple(params["state_shape"])
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
     os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
 
-    mp.set_start_method("spawn")
+    mp.set_start_method("fork")
     lock = mp.Lock()
 
     experiment = Experiment()

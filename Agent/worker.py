@@ -21,23 +21,26 @@ class Worker(torch.multiprocessing.Process):
         self.id = id
         self.config = config
         self.logger = logger
-        self.memory = Memory(self.config["mem_size"], seed=self.config["seed"])
-        self.env = make_atari(self.config["env_name"], seed=self.config["seed"])
+        self.seed = self.config["seed"] + self.id
+        self.memory = Memory(self.config["mem_size"], seed=self.seed)
+        self.env = make_atari(self.config["env_name"], seed=self.seed)
         self.tau = self.config["polyak_coeff"]
 
-        np.random.seed(self.config["seed"])
+        np.random.seed(self.seed)
 
-        torch.manual_seed(self.config["seed"])
+        torch.manual_seed(self.seed)
         self.local_model = Model(self.config["state_shape"], self.config["n_actions"])
+        self.mse_loss = torch.nn.MSELoss()
 
         self.global_model = global_model
         self.avg_model = avg_model
         self.shared_optimizer = shared_optimizer
         self.lock = lock
 
-        self.mse_loss = torch.nn.MSELoss()
-        self.episode = 0
         self.eps = 1e-6
+        self.episode = 0
+        self.iter = 0
+        self.step = 0
 
     def get_actions_and_qvalues(self, state):
         state = np.expand_dims(state, 0)
@@ -48,7 +51,8 @@ class Worker(torch.multiprocessing.Process):
         return action.numpy(), q_values.numpy(), probs.numpy()
 
     def sync_thread_spec_params(self):
-        self.local_model.load_state_dict(self.global_model.state_dict())
+        with self.lock:
+            self.local_model.load_state_dict(self.global_model.state_dict())
 
     def update_shared_model(self, grads, model):
         with self.lock:
@@ -59,58 +63,16 @@ class Worker(torch.multiprocessing.Process):
             for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
                 avg_param.data.copy_(self.tau * global_param.data + (1 - self.tau) * avg_param.data)
 
-    def run(self):
-        print(f"Worker: {self.id} started.")
-        running_reward = 0
-        state = np.zeros(self.config["state_shape"], dtype=np.uint8)
-        obs = self.env.reset()
-        state = make_state(state, obs, True)
-        next_state = None
-        episode_reward = 0
-        while True:
-            self.shared_optimizer.zero_grad()
-            self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+    def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
+        q_ret = next_value
+        q_returns = []
+        rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
+        for i in reversed(range(self.config["k"])):
+            q_ret = rewards[i] + self.config["gamma"] * (~dones[i]) * q_ret
+            q_returns.insert(0, q_ret)
+            q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
 
-            states, actions, rewards, dones, mus = [], [], [], [], []
-            for step in range(1, 1 + self.config["k"]):
-                action, _, mu = self.get_actions_and_qvalues(state)
-                next_obs, reward, done, _ = self.env.step(action[0])
-                # self.env.render()
-
-                states.append(state)
-                actions.append(action[0])
-                rewards.append(np.sign(reward))
-                dones.append(done)
-                mus.append(mu[0])
-
-                episode_reward += reward
-                next_state = make_state(state, next_obs, False)
-                state = next_state
-
-                if done:
-                    obs = self.env.reset()
-                    state = make_state(state, obs, True)
-
-                    self.episode += 1
-                    if self.episode == 1:
-                        running_reward = episode_reward
-                    else:
-                        running_reward = 0.99 * running_reward + 0.01 * episode_reward
-
-                    print(f"\nW{self.id}| Ep {self.episode}| Re {running_reward:.0f}| Mem len {len(self.memory)}")
-                    episode_reward = 0
-
-            trajectory = dict(states=states, actions=actions, rewards=rewards,
-                              dones=dones, mus=mus, next_state=next_state)
-            self.memory.add(**trajectory)
-            self.train(states, actions, rewards, dones, mus, next_state)
-
-            n = np.random.poisson(self.config["replay_ratio"])
-            for _ in range(n):
-                self.shared_optimizer.zero_grad()
-                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
-
-                self.train(*self.memory.sample())
+        return torch.cat(q_returns).view(-1, 1)
 
     def train(self, states, actions, rewards, dones, mus, next_state):
         states = torch.ByteTensor(states)
@@ -168,14 +130,75 @@ class Worker(torch.multiprocessing.Process):
 
         grads = [param.grad for param in self.local_model.parameters()]
         self.update_shared_model(grads, self.global_model)
+        return (f * grads_f).mean().item(), loss_q.item()
 
-    def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
-        q_ret = next_value
-        q_returns = []
-        rho_bar_i = torch.min(torch.ones_like(rho_i), rho_i)
-        for i in reversed(range(self.config["k"])):
-            q_ret = rewards[i] + self.config["gamma"] * (~dones[i]) * q_ret
-            q_returns.insert(0, q_ret)
-            q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
+    def run(self):
+        print(f"Worker: {self.id} started.")
+        state = np.zeros(self.config["state_shape"], dtype=np.uint8)
+        obs = self.env.reset()
+        state = make_state(state, obs, True)
+        next_state = None
+        episode_reward = 0
+        while True:
+            self.iter += 1
+            self.shared_optimizer.zero_grad()
+            self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-        return torch.cat(q_returns).view(-1, 1)
+            states, actions, rewards, dones, mus = [], [], [], [], []
+            for _ in range(1, 1 + self.config["k"]):
+                self.step += 1
+                print(self.step)
+                action, _, mu = self.get_actions_and_qvalues(state)
+                next_obs, reward, done, _ = self.env.step(action[0])
+                # self.env.render()
+
+                states.append(state)
+                actions.append(action[0])
+                rewards.append(np.sign(reward))
+                dones.append(done)
+                mus.append(mu[0])
+
+                episode_reward += reward
+                next_state = make_state(state, next_obs, False)
+                state = next_state
+
+                if done:
+                    obs = self.env.reset()
+                    state = make_state(state, obs, True)
+                    self.episode += 1
+                    with self.lock:
+                        self.logger.episodic_log(self.id, self.episode, episode_reward, len(self.memory), self.step)
+                    episode_reward = 0
+                    self.step = 0
+
+            trajectory = dict(states=states, actions=actions, rewards=rewards,
+                              dones=dones, mus=mus, next_state=next_state)
+            self.memory.add(**trajectory)
+            policy_loss, value_loss = self.train(states, actions, rewards, dones, mus, next_state)
+            with self.lock:
+                self.logger.training_log(self.id,
+                                         self.iter,
+                                         policy_loss,
+                                         value_loss,
+                                         self.global_model,
+                                         self.avg_model,
+                                         self.shared_optimizer)
+
+            n = np.random.poisson(self.config["replay_ratio"])
+            pl, vl = [], []
+            for _ in range(n):
+                self.shared_optimizer.zero_grad()
+                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+
+                policy_loss, value_loss = self.train(*self.memory.sample())
+                pl.append(policy_loss)
+                vl.append(value_loss)
+            with self.lock:
+                self.logger.training_log(self.id,
+                                         self.iter,
+                                         sum(pl) / n,
+                                         sum(vl) / n,
+                                         self.global_model,
+                                         self.avg_model,
+                                         self.shared_optimizer)
+
