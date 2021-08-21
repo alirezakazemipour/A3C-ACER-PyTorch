@@ -4,8 +4,8 @@ import torch
 from torch import from_numpy
 from memory import Memory
 from torch.nn.functional import relu
-from atari_wrappers import make_atari
 from utils import make_state
+from atari_wrappers import make_atari
 
 
 class Worker(torch.multiprocessing.Process):
@@ -27,8 +27,8 @@ class Worker(torch.multiprocessing.Process):
                  polyak_coeff,
                  critic_coeff,
                  max_episode_steps,
-                 lock,
-                 queue):
+                 lock
+                 ):
         super(Worker, self).__init__()
         self.id = id
         self.state_shape = state_shape
@@ -53,7 +53,6 @@ class Worker(torch.multiprocessing.Process):
         self.avg_model = avg_model
         self.shared_optimizer = shared_optimizer
         self.lock = lock
-        self.queue = queue
 
         self.mse_loss = torch.nn.MSELoss()
         self.ep = 0
@@ -69,6 +68,15 @@ class Worker(torch.multiprocessing.Process):
     def sync_thread_spec_params(self):
         self.local_model.load_state_dict(self.global_model.state_dict())
 
+    def update_shared_model(self, grads, model):
+        with self.lock:
+            for gradient, param in zip(grads, model.parameters()):
+                param._grad = gradient
+
+            self.shared_optimizer.step()
+            for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
+                avg_param.data.copy_(self.polyak_coeff * global_param.data + (1 - self.polyak_coeff) * avg_param.data)
+
     def run(self):
         print(f"Worker: {self.id} started.")
         running_reward = 0
@@ -78,8 +86,8 @@ class Worker(torch.multiprocessing.Process):
         next_state = None
         episode_reward = 0
         while True:
-            with self.lock:
-                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+            self.shared_optimizer.zero_grad()
+            self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
             states, actions, rewards, dones, mus = [], [], [], [], []
             for step in range(1, 1 + self.k):
@@ -117,8 +125,8 @@ class Worker(torch.multiprocessing.Process):
 
             n = np.random.poisson(self.replay_ratio)
             for _ in range(n):
-                with self.lock:
-                    self.sync_thread_spec_params()  # Synchronize thread-specific parameters
+                self.shared_optimizer.zero_grad()
+                self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
                 self.train(*self.memory.sample())
 
@@ -177,8 +185,7 @@ class Worker(torch.multiprocessing.Process):
         loss_q.backward()
 
         grads = [param.grad for param in self.local_model.parameters()]
-
-        self.queue.put((grads, self.id))
+        self.update_shared_model(grads, self.global_model)
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
@@ -190,5 +197,3 @@ class Worker(torch.multiprocessing.Process):
             q_ret = rho_bar_i[i] * (q_ret - q_values[i]) + values[i]
 
         return torch.cat(q_returns).view(-1, 1)
-
-

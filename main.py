@@ -20,20 +20,6 @@ critic_coeff = 0.5
 state_shape = (4, 84, 84)
 
 
-def update_shared_model(queue, lock, opt, model, avg_model):
-    while True:
-        grads, id = queue.get()
-        # print(f"grads of worker:{id}")
-        with lock:
-            opt.zero_grad()
-            for a_grad, param in zip(grads, model.parameters()):
-                param._grad = a_grad
-
-            opt.step()
-            for avg_param, global_param in zip(avg_model.parameters(), model.parameters()):
-                avg_param.data.copy_(polyak_coeff * global_param.data + (1 - polyak_coeff) * avg_param.data)
-
-
 if __name__ == "__main__":
     mp.set_start_method("spawn")
 
@@ -60,14 +46,7 @@ if __name__ == "__main__":
     for p in avg_model.parameters():
         p.requires_grad = False
 
-    grad_updates_queue = mp.Queue()
     lock = mp.Lock()
-
-    optimizer_worker = mp.Process(target=update_shared_model,
-                                  args=(grad_updates_queue, lock, shared_opt,
-                                        global_model, avg_model))
-    optimizer_worker.start()
-
     workers = [Worker(id=i,
                       state_shape=state_shape,
                       n_actions=n_actions,
@@ -81,15 +60,14 @@ if __name__ == "__main__":
                       k=k,
                       c=c,
                       delta=delta,
+                      lock=lock,
                       replay_ratio=replay_ratio,
                       polyak_coeff=polyak_coeff,
                       critic_coeff=critic_coeff,
                       max_episode_steps=max_episode_steps,
-                      lock=lock,
-                      queue=grad_updates_queue) for i in range(n_workers)
+                      ) for i in range(n_workers)
                ]
     processes = []
-    lock = mp.Lock()
     for worker in workers:
         worker.start()
         processes.append(worker)
