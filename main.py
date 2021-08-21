@@ -4,27 +4,32 @@ from shared_optimizer import SharedAdam
 from worker import Worker
 from torch import multiprocessing as mp
 import os
-
-env_name = "PongNoFrameskip-v4"
-n_workers = os.cpu_count()
-lr = 7e-4
-gamma = 0.99
-ent_coeff = 0.001
-k = 20
-mem_size = 100000 // n_workers // k
-c = 10
-delta = 1
-replay_ratio = 4
-polyak_coeff = 0.01
-critic_coeff = 0.5
-state_shape = (4, 84, 84)
+import yaml
+import argparse
 
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn")
+    with open("training_configs.yml") as f:
+        params = yaml.load(f.read())
 
-    os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
-    os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
+    params.update({"n_workers": os.cpu_count()})
+    params.update({"mem_size": params["total_memory_size"] // params["n_workers"] // params["k"]})
+    if not isinstance(params["state_shape"], tuple):
+        params["state_shape"] = tuple(params["state_shape"])
+
+    parser = argparse.ArgumentParser(
+        description="Variable parameters based on the configuration of the machine or user's choice")
+    parser.add_argument("--env_name", default="PongNoFrameskip-v4", type=str, help="Name of the environment.")
+    parser.add_argument("--interval", default=50, type=int,
+                        help="The interval specifies how often different parameters should be saved and printed,"
+                             " counted by episodes.")
+    parser.add_argument("--do_train", action="store_true",
+                        help="The flag determines whether to train the agent or play with it.")
+    parser.add_argument("--seed", default=123, type=int,
+                        help="The randomness' seed for torch, numpy, random & gym[env].")
+    parser_params = parser.parse_args()
+
+    params = {**vars(parser_params), **params}
 
     test_env = gym.make(env_name)
     n_actions = test_env.action_space.n
@@ -33,6 +38,11 @@ if __name__ == "__main__":
     print(f"Env: {env_name}\n"
           f"n_actions: {n_actions}\n"
           f"n_workers: {n_workers}\n")
+
+    mp.set_start_method("spawn")
+
+    os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
+    os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
 
     global_model = Model(state_shape, n_actions)
     global_model.share_memory()
