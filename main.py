@@ -1,16 +1,21 @@
+from comet_ml import Experiment
 import gym
 from NN import Model, SharedAdam
 from Agent import Worker
+from Utils import Logger
 from torch import multiprocessing as mp
 import torch
 import os
 import yaml
 import argparse
 
+# TODOs:
+# Add docker support
+# Add CircleCI
 
 if __name__ == "__main__":
     with open("training_configs.yml") as f:
-        params = yaml.load(f.read())
+        params = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     params.update({"n_workers": os.cpu_count()})
     params.update({"mem_size": params["total_memory_size"] // params["n_workers"] // params["k"]})
@@ -60,11 +65,14 @@ if __name__ == "__main__":
     mp.set_start_method("spawn")
     lock = mp.Lock()
 
+    experiment = Experiment()
+    logger = Logger(experiment=experiment, **params)
     workers = [Worker(id=i,
                       global_model=global_model,
                       avg_model=avg_model,
                       shared_optimizer=shared_opt,
                       lock=lock,
+                      logger=logger,
                       **params) for i in range(params["n_workers"])
                ]
 

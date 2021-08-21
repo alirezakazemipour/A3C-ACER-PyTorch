@@ -14,11 +14,13 @@ class Worker(torch.multiprocessing.Process):
                  avg_model,
                  shared_optimizer,
                  lock,
+                 logger,
                  **config
                  ):
         super(Worker, self).__init__()
         self.id = id
         self.config = config
+        self.logger = logger
         self.memory = Memory(self.config["mem_size"], seed=self.config["seed"])
         self.env = make_atari(self.config["env_name"], seed=self.config["seed"])
         self.tau = self.config["polyak_coeff"]
