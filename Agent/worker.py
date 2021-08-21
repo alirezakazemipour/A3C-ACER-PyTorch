@@ -35,6 +35,7 @@ class Worker(torch.multiprocessing.Process):
 
         self.mse_loss = torch.nn.MSELoss()
         self.episode = 0
+        self.eps = 1e-6
 
     def get_actions_and_qvalues(self, state):
         state = np.expand_dims(state, 0)
@@ -124,7 +125,7 @@ class Worker(torch.multiprocessing.Process):
         with torch.no_grad():
             values = (q_values * f).sum(-1, keepdims=True)
 
-            rho = f / (mus + 1e-6)
+            rho = f / (mus + self.eps)
             rho_i = rho.gather(-1, actions)
 
             _, next_q_value, next_mu = self.get_actions_and_qvalues(next_state)
@@ -137,15 +138,15 @@ class Worker(torch.multiprocessing.Process):
         # Truncated Importance Sampling:
         adv = q_ret - values
         f_i = f.gather(-1, actions)
-        logf_i = torch.log(f_i + 1e-6)
+        logf_i = torch.log(f_i + self.eps)
         gain_f = logf_i * adv * torch.min(self.config["c"] * torch.ones_like(rho_i), rho_i)
         loss_f = -gain_f.mean()
 
         # Bias correction for the truncation
         adv_bc = q_values.detach() - values
 
-        logf_bc = torch.log(f + 1e-6)
-        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.config["c"] / (rho + 1e-6)) * f.detach(), dim=-1)
+        logf_bc = torch.log(f + self.eps)
+        gain_bc = torch.sum(logf_bc * adv_bc * relu(1 - self.config["c"] / (rho + self.eps)) * f.detach(), dim=-1)
         loss_bc = -gain_bc.mean()
 
         policy_loss = loss_f + loss_bc
@@ -153,11 +154,11 @@ class Worker(torch.multiprocessing.Process):
 
         # trust region:
         g = torch.autograd.grad(-(policy_loss - self.config["ent_coeff"] * ent), f)[0]
-        k = -f_avg / (f.detach() + 1e-6)
+        k = -f_avg / (f.detach() + self.eps)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g),
-                        (k_dot_g - self.config["delta"]) / (torch.sum(k.square(), dim=-1, keepdim=True) + 1e-6))
+                        (k_dot_g - self.config["delta"]) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
 
         grads_f = -(g - adj * k)
         f.backward(grads_f, retain_graph=True)
