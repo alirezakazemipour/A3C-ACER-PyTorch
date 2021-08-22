@@ -1,13 +1,14 @@
 import numpy as np
 import datetime
 import torch
+from torch.utils.tensorboard import SummaryWriter
+import os
 
 
 class Logger:
     def __init__(self, **config):
         self.config = config
         self.log_dir = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        self.experiment = self.config["experiment"]
         self.episode_stats = [dict(episode=0,
                                    max_reward=-np.inf,
                                    running_reward=0,
@@ -17,15 +18,32 @@ class Logger:
         self.iter_stats = [dict(running_ploss=0,
                                 running_vloss=0,
                                 ) for i in range(self.config["n_workers"])]
-        self.exp_avg = lambda x, y: 0.99 * x + 0.01 * y if (y != 0).all() else y
 
-        self._log_hyperparams()
+        if self.config["do_train"] and self.config["train_from_scratch"]:
+            self.create_wights_folder(self.log_dir)
+            self.log_params()
+
+    @staticmethod
+    def create_wights_folder(dir):
+        if not os.path.exists("Models"):
+            os.mkdir("Models")
+        os.mkdir("Models/" + dir)
+
+    def log_params(self):
+        with SummaryWriter("Logs/" + self.log_dir) as writer:
+            for k, v in self.config.items():
+                writer.add_text(k, str(v))
 
     # region log hyperparameters
     def _log_hyperparams(self):
-        self.experiment.log_parameters(self.config)
+        with SummaryWriter("Logs/" + self.log_dir) as writer:
+            for k, v in self.config.items():
+                writer.add_text(k, str(v))
 
     # endregion
+    @staticmethod
+    def exp_avg(x, y):
+        return 0.99 * x + 0.01 * y
 
     def episodic_log(self, id, episode, reward, mem_len, episode_len):
         if episode == 1:
@@ -38,9 +56,9 @@ class Logger:
 
         self.episode_stats[id]["mem_len"] = mem_len
         self.episode_stats[id]["episode"] = episode
-        self.episode_stats[id]["max_reward"] = max(self.episode_stats[id]["max_episode"], reward)
+        self.episode_stats[id]["max_reward"] = max(self.episode_stats[id]["max_reward"], reward)
 
-    def training_log(self, id, iteration, p_loss, v_loss, g_model, avg_model, opt):
+    def training_log(self, id, iteration, p_loss, v_loss, g_model, avg_model, opt, on_policy=False):
         if iteration == 0:
             self.iter_stats[id]["running_ploss"] = p_loss
             self.iter_stats[id]["running_vloss"] = v_loss
@@ -48,25 +66,26 @@ class Logger:
             self.iter_stats[id]["running_ploss"] = self.exp_avg(self.iter_stats[id]["running_ploss"], p_loss)
             self.iter_stats[id]["running_vloss"] = self.exp_avg(self.iter_stats[id]["running_vloss"], v_loss)
 
-        if id == 0:
+        if id == 0 and on_policy:
 
             if iteration % (self.config["interval"] // 3) == 0:
                 self.save_params(iteration, g_model, avg_model, opt)
 
-            self.experiment.log_metric("Max Reward", self.episode_stats[id]["max_reward"],
+            with SummaryWriter("Logs/" + self.log_dir) as writer:
+                writer.add_scalar("Max Reward", self.episode_stats[id]["max_reward"],
                                        self.episode_stats[id]["episode"])
-            self.experiment.log_metric("Running Reward", self.episode_stats[id]["running_reward"],
+                writer.add_scalar("Running Reward", self.episode_stats[id]["running_reward"],
                                        self.episode_stats[id]["episode"])
-            self.experiment.log_metric("Episode length", self.episode_stats[id]["episode_len"],
+                writer.add_scalar("Episode length", self.episode_stats[id]["episode_len"],
                                        self.episode_stats[id]["episode"])
-            self.experiment.log_metric("Running PG Loss", self.iter_stats[id]["running_ploss"], iteration)
-            self.experiment.log_metric("Running Value Loss", self.iter_stats[id]["running_vloss"], iteration)
+                writer.add_scalar("Running PG Loss", self.iter_stats[id]["running_ploss"], iteration)
+                writer.add_scalar("Running Value Loss", self.iter_stats[id]["running_vloss"], iteration)
 
             if iteration % self.config["interval"] == 0:
                 print("Iter: {}| "
                       "E: {}| "
                       "E_Running_Reward: {:.1f}| "
-                      "E_length:{}| "
+                      "E_length:{:.1f}| "
                       "Mem_length:{}| "
                       "Time:{} "
                       .format(iteration,

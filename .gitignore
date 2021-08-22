@@ -133,3 +133,4 @@ dmypy.json
 *.avi
 *.png
 .comet.config
+events.*

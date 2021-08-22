@@ -147,7 +147,6 @@ class Worker(torch.multiprocessing.Process):
             states, actions, rewards, dones, mus = [], [], [], [], []
             for _ in range(1, 1 + self.config["k"]):
                 self.step += 1
-                print(self.step)
                 action, _, mu = self.get_actions_and_qvalues(state)
                 next_obs, reward, done, _ = self.env.step(action[0])
                 # self.env.render()
@@ -182,11 +181,12 @@ class Worker(torch.multiprocessing.Process):
                                          value_loss,
                                          self.global_model,
                                          self.avg_model,
-                                         self.shared_optimizer)
+                                         self.shared_optimizer,
+                                         on_policy=True)
 
             n = np.random.poisson(self.config["replay_ratio"])
             pl, vl = [], []
-            for _ in range(n):
+            for _ in range(self.config["replay_ration"]):
                 self.shared_optimizer.zero_grad()
                 self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
@@ -196,8 +196,8 @@ class Worker(torch.multiprocessing.Process):
             with self.lock:
                 self.logger.training_log(self.id,
                                          self.iter,
-                                         sum(pl) / n,
-                                         sum(vl) / n,
+                                         sum(pl) / self.config["replay_ration"],
+                                         sum(vl) / self.config["replay_ration"],
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer)
