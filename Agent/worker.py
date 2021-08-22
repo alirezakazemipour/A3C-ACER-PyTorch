@@ -186,7 +186,7 @@ class Worker(torch.multiprocessing.Process):
 
             n = np.random.poisson(self.config["replay_ratio"])
             pl, vl = [], []
-            for _ in range(self.config["replay_ration"]):
+            for _ in range(n):
                 self.shared_optimizer.zero_grad()
                 self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
@@ -196,8 +196,8 @@ class Worker(torch.multiprocessing.Process):
             with self.lock:
                 self.logger.training_log(self.id,
                                          self.iter,
-                                         sum(pl) / self.config["replay_ration"],
-                                         sum(vl) / self.config["replay_ration"],
+                                         sum(pl) / sum(pl) if n != 0 else 0,
+                                         sum(vl) / sum(vl) if n != 0 else 0,
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer)
