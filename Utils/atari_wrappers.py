@@ -41,6 +41,18 @@ class NoopResetEnv(gym.Wrapper):
                 obs = self.env.reset()
         return obs
 
+    def get_rng_state(self):
+        env_rng = self.env.np_random.get_state()
+        env_obs_rng = self.env.observation_space.np_random.get_state()
+        env_ac_rng = self.env.action_space.np_random.get_state()
+        return np.random.get_state(), env_rng, env_obs_rng, env_ac_rng
+
+    def set_rng_state(self, *state):
+        np.random.set_state(state[0])
+        env_rng = self.env.np_random.get_state(state[1])
+        env_obs_rng = self.env.observation_space.np_random.get_state(state[2])
+        env_ac_rng = self.env.action_space.np_random.get_state(state[3])
+
 
 class MaxAndSkipEnv(gym.Wrapper):
     def __init__(self, env, skip=4):

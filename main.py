@@ -7,6 +7,7 @@ import torch
 import os
 import yaml
 import argparse
+import numpy as np
 
 # TODOs:
 # Add docker support
@@ -16,7 +17,7 @@ if __name__ == "__main__":
     with open("training_configs.yml") as f:
         params = yaml.load(f.read())
 
-    params.update({"n_workers": os.cpu_count()})
+    params.update({"n_workers": 2})
     params.update({"mem_size": int(params["total_memory_size"]) // params["n_workers"] // params["k"]})
     if not isinstance(params["state_shape"], tuple):
         params["state_shape"] = tuple(params["state_shape"])
@@ -68,7 +69,7 @@ if __name__ == "__main__":
 
     logger = Logger(**params)
     if not params["train_from_scratch"]:
-        checkpoint, episodes, iterations = logger.load_weights()
+        checkpoint, episodes, iterations, rng_states = logger.load_weights()
         global_model.load_state_dict(checkpoint["global_model_state_dict"])
         avg_model.load_state_dict(checkpoint["average_model_state_dict"])
         shared_opt.load_state_dict(checkpoint["shared_optimizer_state_dict"])
@@ -76,6 +77,7 @@ if __name__ == "__main__":
     else:
         episodes = [0 for _ in range(params["n_workers"])]
         iterations = [0 for _ in range(params["n_workers"])]
+        rng_states = np.zeros((params["n_workers"], 3))
 
     workers = [Worker(id=i,
                       global_model=global_model,
@@ -86,9 +88,11 @@ if __name__ == "__main__":
                       **params) for i in range(params["n_workers"])
                ]
 
-    for worker, episode in zip(workers, episodes):
+    for worker, episode, iteration, rng_state in zip(workers, episodes, iterations, rng_states):
         worker.episode = episode
-        worker.iter = iterations
+        worker.iter = iteration
+        if not params["train_from_scratch"]:
+            worker.set_rng_state(*rng_state)
         worker.start()
 
     for worker in workers:

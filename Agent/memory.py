@@ -30,3 +30,11 @@ class Memory:
 
     def __len__(self):
         return len(self.state_buffer)
+
+    @staticmethod
+    def get_rng_state():
+        return np.random.get_state()
+
+    @staticmethod
+    def set_rng_state(state):
+        np.random.set_state(state)

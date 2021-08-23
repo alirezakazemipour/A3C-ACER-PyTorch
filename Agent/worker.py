@@ -42,6 +42,11 @@ class Worker(torch.multiprocessing.Process):
         self.iter = 0
         self.step = 0
 
+    def set_rng_state(self, *rng_state):
+        np.random.set_state(rng_state[0])
+        self.memory.set_rng_state(rng_state[1])
+        self.env.set_rng_state(*rng_state[2])
+
     def get_actions_and_qvalues(self, state):
         state = np.expand_dims(state, 0)
         state = from_numpy(state).byte()
@@ -182,7 +187,10 @@ class Worker(torch.multiprocessing.Process):
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer,
-                                         on_policy=True)
+                                         on_policy=True,
+                                         np_rng_state=np.random.get_state(),
+                                         mem_rng_state=self.memory.get_rng_state(),
+                                         env_rng_state=self.env.get_rng_state())
 
             n = np.random.poisson(self.config["replay_ratio"])
             pl, vl = [], []

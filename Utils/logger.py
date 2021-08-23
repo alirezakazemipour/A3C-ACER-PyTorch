@@ -19,6 +19,9 @@ class Logger:
         self.iter_stats = [dict(iteration=0,
                                 running_ploss=0,
                                 running_vloss=0,
+                                np_rng_state=None,
+                                mem_rng_state=None,
+                                env_rng_state=None
                                 ) for i in range(self.config["n_workers"])]
 
         if self.config["do_train"] and self.config["train_from_scratch"]:
@@ -60,7 +63,16 @@ class Logger:
         self.episode_stats[id]["episode"] = episode
         self.episode_stats[id]["max_reward"] = max(self.episode_stats[id]["max_reward"], reward)
 
-    def training_log(self, id, iteration, p_loss, v_loss, g_model, avg_model, opt, on_policy=False):
+    def training_log(self, id,
+                     iteration,
+                     p_loss,
+                     v_loss,
+                     g_model, avg_model,
+                     opt, on_policy=False,
+                     np_rng_state=None,
+                     mem_rng_state=None,
+                     env_rng_state=None):
+
         if iteration == 0:
             self.iter_stats[id]["running_ploss"] = p_loss
             self.iter_stats[id]["running_vloss"] = v_loss
@@ -69,6 +81,9 @@ class Logger:
             self.iter_stats[id]["running_vloss"] = self.exp_avg(self.iter_stats[id]["running_vloss"], v_loss)
 
         self.iter_stats[id]["iteration"] = iteration
+        self.iter_stats[id]["np_rng_state"] = np_rng_state
+        self.iter_stats[id]["mem_rng_state"] = mem_rng_state
+        self.iter_stats[id]["env_rng_state"] = env_rng_state
 
         if id == 0 and on_policy:
 
@@ -105,7 +120,6 @@ class Logger:
         torch.save({"global_model_state_dict": g_model.state_dict(),
                     "average_model_state_dict": avg_model.state_dict(),
                     "shared_optimizer_state_dict": opt.state_dict(),
-                    "iteration": iteration,
                     "episode_stats": self.episode_stats,
                     "iter_stats": self.iter_stats
                     },
@@ -120,5 +134,10 @@ class Logger:
         self.episode_stats = checkpoint["episode_stats"]
         self.iter_stats = checkpoint["iter_stats"]
 
+        a = [self.iter_stats[i]["np_rng_state"] for i in range(self.config["n_workers"])]
+        b = [self.iter_stats[i]["mem_rng_state"] for i in range(self.config["n_workers"])]
+        c = [self.iter_stats[i]["env_rng_state"] for i in range(self.config["n_workers"])]
+
         return checkpoint, [self.episode_stats[i]["episode"] for i in range(self.config["n_workers"])], \
-               [self.iter_stats[i]["iteration"] for i in range(self.config["n_workers"])]
+               [self.iter_stats[i]["iteration"] for i in range(self.config["n_workers"])], \
+               np.stack([a, b, c], axis=-1)
