@@ -3,6 +3,7 @@ import datetime
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import os
+import glob
 
 
 class Logger:
@@ -15,7 +16,8 @@ class Logger:
                                    mem_len=0,
                                    episode_len=0
                                    ) for i in range(self.config["n_workers"])]
-        self.iter_stats = [dict(running_ploss=0,
+        self.iter_stats = [dict(iteration=0,
+                                running_ploss=0,
                                 running_vloss=0,
                                 ) for i in range(self.config["n_workers"])]
 
@@ -66,6 +68,8 @@ class Logger:
             self.iter_stats[id]["running_ploss"] = self.exp_avg(self.iter_stats[id]["running_ploss"], p_loss)
             self.iter_stats[id]["running_vloss"] = self.exp_avg(self.iter_stats[id]["running_vloss"], v_loss)
 
+        self.iter_stats[id]["iteration"] = iteration
+
         if id == 0 and on_policy:
 
             if iteration % (self.config["interval"] // 3) == 0:
@@ -106,3 +110,15 @@ class Logger:
                     "iter_stats": self.iter_stats
                     },
                    "Models/" + self.log_dir + "/params.pth")
+
+    def load_weights(self):
+        model_dir = glob.glob("Models/*")
+        model_dir.sort()
+        checkpoint = torch.load(model_dir[-1] + "/params.pth")
+        self.log_dir = model_dir[-1].split(os.sep)[-1]
+
+        self.episode_stats = checkpoint["episode_stats"]
+        self.iter_stats = checkpoint["iter_stats"]
+
+        return checkpoint, [self.episode_stats[i]["episode"] for i in range(self.config["n_workers"])], \
+               [self.iter_stats[i]["iteration"] for i in range(self.config["n_workers"])]

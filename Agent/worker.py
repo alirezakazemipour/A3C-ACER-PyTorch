@@ -201,4 +201,3 @@ class Worker(torch.multiprocessing.Process):
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer)
-

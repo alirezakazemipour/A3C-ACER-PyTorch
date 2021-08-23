@@ -67,6 +67,16 @@ if __name__ == "__main__":
     lock = mp.Lock()
 
     logger = Logger(**params)
+    if not params["train_from_scratch"]:
+        checkpoint, episodes, iterations = logger.load_weights()
+        global_model.load_state_dict(checkpoint["global_model_state_dict"])
+        avg_model.load_state_dict(checkpoint["average_model_state_dict"])
+        shared_opt.load_state_dict(checkpoint["shared_optimizer_state_dict"])
+
+    else:
+        episodes = [0 for _ in range(params["n_workers"])]
+        iterations = [0 for _ in range(params["n_workers"])]
+
     workers = [Worker(id=i,
                       global_model=global_model,
                       avg_model=avg_model,
@@ -76,7 +86,9 @@ if __name__ == "__main__":
                       **params) for i in range(params["n_workers"])
                ]
 
-    for worker in workers:
+    for worker, episode in zip(workers, episodes):
+        worker.episode = episode
+        worker.iter = iterations
         worker.start()
 
     for worker in workers:
