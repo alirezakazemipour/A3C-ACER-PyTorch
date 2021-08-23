@@ -11,7 +11,6 @@ import numpy as np
 
 # TODOs:
 # Add docker support
-# Add CircleCI
 
 if __name__ == "__main__":
     with open("training_configs.yml") as f:
@@ -24,7 +23,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description="Variable parameters based on the configuration of the machine or user's choice")
-    parser.add_argument("--env_name", default="PongNoFrameskip-v4", type=str, help="Name of the environment.")
+    parser.add_argument("--env_name", default="BreakoutNoFrameskip-v4", type=str, help="Name of the environment.")
     parser.add_argument("--interval", default=50, type=int,
                         help="The interval specifies how often different parameters should be saved and printed,"
                              " counted by episodes.")

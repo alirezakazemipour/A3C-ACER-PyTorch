@@ -4,6 +4,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 import os
 import glob
+import psutil
 
 
 class Logger:
@@ -15,14 +16,16 @@ class Logger:
                                    running_reward=0,
                                    mem_len=0,
                                    episode_len=0
-                                   ) for i in range(self.config["n_workers"])]
+                                   ) for i in range(self.config["n_workers"])
+                              ]
         self.iter_stats = [dict(iteration=0,
                                 running_ploss=0,
                                 running_vloss=0,
                                 np_rng_state=None,
                                 mem_rng_state=None,
                                 env_rng_state=None
-                                ) for i in range(self.config["n_workers"])]
+                                ) for i in range(self.config["n_workers"])
+                           ]
 
         if self.config["do_train"] and self.config["train_from_scratch"]:
             self.create_wights_folder(self.log_dir)
@@ -49,6 +52,10 @@ class Logger:
     @staticmethod
     def exp_avg(x, y):
         return 0.99 * x + 0.01 * y
+
+    @staticmethod
+    def to_gb(in_bytes):
+        return in_bytes/ 1024 / 1024 / 1024
 
     def episodic_log(self, id, episode, reward, mem_len, episode_len):
         if episode == 1:
@@ -101,17 +108,22 @@ class Logger:
                 writer.add_scalar("Running Value Loss", self.iter_stats[id]["running_vloss"], iteration)
 
             if iteration % self.config["interval"] == 0:
+                ram = psutil.virtual_memory()
+
                 print("Iter: {}| "
                       "E: {}| "
                       "E_Running_Reward: {:.1f}| "
                       "E_length:{:.1f}| "
                       "Mem_length:{}| "
+                      "{:.1f}/{:.1f} GB RAM| "
                       "Time:{} "
                       .format(iteration,
                               self.episode_stats[id]["episode"],
                               self.episode_stats[id]["running_reward"],
                               self.episode_stats[id]["episode_len"],
                               self.episode_stats[id]["mem_len"],
+                              self.to_gb(ram.used),
+                              self.to_gb(ram.total),
                               datetime.datetime.now().strftime("%H:%M:%S"),
                               )
                       )
