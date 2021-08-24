@@ -73,6 +73,7 @@ class Worker(torch.multiprocessing.Process):
         state = make_state(state, obs, True)
         next_state = None
         episode_reward = 0
+        episode_len = 0
         while True:
             self.iter += 1
             self.shared_optimizer.zero_grad()  # Reset global gradients
@@ -80,6 +81,7 @@ class Worker(torch.multiprocessing.Process):
 
             states, actions, rewards, dones = [], [], [], []
             for step in range(1, 1 + self.config["max_episode_steps"]):
+                episode_len += 1
                 action, _ = self.get_actions_and_values(state)
                 next_obs, reward, done, _ = self.env.step(action)
                 # self.env.render()
@@ -97,12 +99,15 @@ class Worker(torch.multiprocessing.Process):
                     state = make_state(state, obs, True)
 
                     self.episode += 1
-                    self.episode_stats = utils.episodic_log(self.episode_stats, self.episode, episode_reward,
-                                                            step)
+                    self.episode_stats = utils.episodic_log(self.episode_stats,
+                                                            self.episode,
+                                                            episode_reward,
+                                                            episode_len)
                     episode_reward = 0
+                    episode_len = 0
 
                 if step % self.config["update_period"] == 0:
-                   break
+                    break
 
             _, R = self.get_actions_and_values(next_state)
             returns = []
