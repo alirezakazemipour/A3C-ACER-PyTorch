@@ -100,7 +100,7 @@ class Logger:
         if id == 0 and on_policy:
 
             if iteration % (self.config["interval"] // 3) == 0:
-                self.save_params(iteration, g_model, avg_model, opt)
+                self.save_params(g_model, avg_model, opt)
 
             with SummaryWriter("Logs/" + self.log_dir) as writer:
                 writer.add_scalar("Max Reward", self.episode_stats[id]["max_reward"],
@@ -134,7 +134,7 @@ class Logger:
                               )
                       )
 
-    def save_params(self, iteration, g_model, avg_model, opt):
+    def save_params(self, g_model, avg_model, opt):
         torch.save({"global_model_state_dict": g_model.state_dict(),
                     "average_model_state_dict": avg_model.state_dict(),
                     "shared_optimizer_state_dict": opt.state_dict(),

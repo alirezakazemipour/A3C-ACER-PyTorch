@@ -49,9 +49,9 @@ class NoopResetEnv(gym.Wrapper):
 
     def set_rng_state(self, *state):
         np.random.set_state(state[0])
-        env_rng = self.env.np_random.get_state(state[1])
-        env_obs_rng = self.env.observation_space.np_random.get_state(state[2])
-        env_ac_rng = self.env.action_space.np_random.get_state(state[3])
+        self.env.np_random.set_state(state[1])
+        self.env.observation_space.np_random.set_state(state[2])
+        self.env.action_space.np_random.set_state(state[3])
 
 
 class MaxAndSkipEnv(gym.Wrapper):
