@@ -42,12 +42,11 @@ def episodic_log(episode_stats, episode, reward, mem_len, episode_len):
     if episode == 1:
         episode_stats["running_reward"] = reward
         episode_stats["episode_len"] = episode_len
-        episode_stats["mem_len"] = mem_len
     else:
         episode_stats["running_reward"] = exp_avg(episode_stats["running_reward"], reward)
         episode_stats["episode_len"] = exp_avg(episode_stats["episode_len"], episode_len)
-        episode_stats["mem_len"] = exp_avg(episode_stats["mem_len"], mem_len)
 
+    episode_stats["mem_len"] = mem_len
     episode_stats["episode"] = episode
     episode_stats["max_reward"] = max(episode_stats["max_reward"], reward)
 
