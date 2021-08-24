@@ -97,7 +97,7 @@ class Logger:
         self.iter_stats[id]["mem_rng_state"] = mem_rng_state
         self.iter_stats[id]["env_rng_state"] = env_rng_state
 
-        if id == 0 and on_policy:
+        if id == 1 and on_policy:
 
             if iteration % (self.config["interval"] // 3) == 0:
                 self.save_params(g_model, avg_model, opt)
