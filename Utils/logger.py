@@ -49,6 +49,7 @@ def episodic_log(episode_stats, episode, reward, mem_len, episode_len):
     episode_stats["mem_len"] = mem_len
     episode_stats["episode"] = episode
     episode_stats["max_reward"] = max(episode_stats["max_reward"], reward)
+    episode_stats["reward"] = reward
 
     return episode_stats
 
@@ -103,6 +104,7 @@ def training_log(iter_stats,
 
                 print("Iter: {}| "
                       "E: {}| "
+                      "E_Reward: {:.1f}| "
                       "E_Running_Reward: {:.1f}| "
                       "E_length: {:.1f}| "
                       "Mem_length: {}| "
@@ -110,6 +112,7 @@ def training_log(iter_stats,
                       "Time: {} "
                       .format(iteration,
                               episode_stats["episode"],
+                              episode_stats["reward"],
                               episode_stats["running_reward"],
                               episode_stats["episode_len"],
                               episode_stats["mem_len"],

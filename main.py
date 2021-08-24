@@ -77,7 +77,8 @@ if __name__ == "__main__":
                               max_reward=-np.inf,
                               running_reward=0,
                               episode_len=0,
-                              mem_len=0
+                              mem_len=0,
+                              reward=0
                               ) for i in range(params["n_workers"])
                          ]
         iter_stats = [dict(iteration=0,

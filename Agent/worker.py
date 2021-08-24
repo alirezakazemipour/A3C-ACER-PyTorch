@@ -43,7 +43,8 @@ class Worker(torch.multiprocessing.Process):
                                    max_reward=-np.inf,
                                    running_reward=0,
                                    episode_len=0,
-                                   mem_len=0
+                                   mem_len=0,
+                                   reward=0
                                    ) for i in range(self.config["n_workers"])
                               ]
         self.iter_stats = [dict(iteration=0,
@@ -143,7 +144,6 @@ class Worker(torch.multiprocessing.Process):
         f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 
-        # grads = [param.grad for param in self.local_model.parameters()]
         grad_norm = torch.nn.utils.clip_grad_norm_(self.local_model.parameters(), self.config["max_grad_norm"])
         self.share_grads_to_global_models(self.local_model, self.global_model)
         self.shared_optimizer.step()
