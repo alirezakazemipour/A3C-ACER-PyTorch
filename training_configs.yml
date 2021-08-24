@@ -3,7 +3,7 @@ lr: 1.0e-4
 gamma: 0.99
 ent_coeff: 0.001
 k: 20
-total_memory_size: 3.0e+5
+total_memory_size: 5.0e+5
 c: 10
 delta: 1
 replay_ratio: 4

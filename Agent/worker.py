@@ -93,8 +93,8 @@ class Worker(torch.multiprocessing.Process):
         states = torch.ByteTensor(states)
         mus = torch.Tensor(mus)
         actions = torch.LongTensor(actions).view(-1, 1)
-        next_state = torch.Tensor(next_state)
-        rewards = torch.Tensor(rewards)
+        next_state = torch.ByteTensor(next_state)
+        rewards = torch.CharTensor(rewards)
         dones = torch.BoolTensor(dones)
 
         dist, q_values, f = self.local_model(states)
@@ -173,8 +173,8 @@ class Worker(torch.multiprocessing.Process):
                 # self.env.render()
 
                 states.append(state)
-                actions.append(action[0])
-                rewards.append(np.sign(reward))
+                actions.append(action[0].astype(np.uint8))
+                rewards.append(np.sign(reward).astype(np.int8))
                 dones.append(done)
                 mus.append(mu[0])
 
@@ -225,14 +225,9 @@ class Worker(torch.multiprocessing.Process):
                 vl.append(value_loss)
                 g_norm.append(grad_norm)
 
-                self.iter_stats = utils.training_log(self.iter_stats,
-                                                     self.episode_stats,
-                                                     self.id,
-                                                     self.iter,
+                self.iter_stats = utils.training_log(self.iter_stats, None, None, self.iter,
                                                      sum(pl) / len(pl) if n != 0 else 0,
                                                      sum(vl) / len(vl) if n != 0 else 0,
                                                      sum(g_norm) / len(g_norm) if n != 0 else 0,
-                                                     self.global_model,
-                                                     self.avg_model,
-                                                     self.shared_optimizer,
-                                                     **self.config)
+                                                     None, None, None
+                                                     )
