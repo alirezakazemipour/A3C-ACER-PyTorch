@@ -4,7 +4,8 @@ import torch
 from torch import from_numpy
 from .memory import Memory
 from torch.nn.functional import relu
-from Utils import make_state, make_atari
+from Utils import make_atari, make_state
+import Utils as utils
 
 
 class Worker(torch.multiprocessing.Process):
@@ -13,14 +14,11 @@ class Worker(torch.multiprocessing.Process):
                  global_model,
                  avg_model,
                  shared_optimizer,
-                 lock,
-                 logger,
                  **config
                  ):
         super(Worker, self).__init__()
         self.id = id
         self.config = config
-        self.logger = logger
         self.seed = self.config["seed"] + self.id
         self.memory = Memory(self.config["mem_size"], seed=self.seed)
         self.env = make_atari(self.config["env_name"], seed=self.seed)
@@ -35,12 +33,27 @@ class Worker(torch.multiprocessing.Process):
         self.global_model = global_model
         self.avg_model = avg_model
         self.shared_optimizer = shared_optimizer
-        self.lock = lock
 
         self.eps = 1e-6
         self.episode = 0
         self.iter = 0
         self.step = 0
+
+        self.episode_stats = [dict(episode=0,
+                                   max_reward=-np.inf,
+                                   running_reward=0,
+                                   episode_len=0,
+                                   mem_len=0
+                                   ) for i in range(self.config["n_workers"])
+                              ]
+        self.iter_stats = [dict(iteration=0,
+                                running_ploss=0,
+                                running_vloss=0,
+                                running_grad_norm=0,
+                                np_rng_state=None,
+                                env_rng_state=None
+                                ) for i in range(self.config["n_workers"])
+                           ]
 
     def set_rng_state(self, *rng_state):
         np.random.set_state(rng_state[0])
@@ -56,7 +69,6 @@ class Worker(torch.multiprocessing.Process):
         return action.numpy(), q_values.numpy(), probs.numpy()
 
     def sync_thread_spec_params(self):
-        # with self.lock:
         self.local_model.load_state_dict(self.global_model.state_dict())
 
     @staticmethod
@@ -174,8 +186,11 @@ class Worker(torch.multiprocessing.Process):
                     obs = self.env.reset()
                     state = make_state(state, obs, True)
                     self.episode += 1
-                    with self.lock:
-                        self.logger.episodic_log(self.id, self.episode, episode_reward, len(self.memory), self.step)
+                    self.episode_stats = utils.episodic_log(self.episode_stats,
+                                                            self.episode,
+                                                            episode_reward,
+                                                            len(self.memory),
+                                                            self.step)
                     episode_reward = 0
                     self.step = 0
 
@@ -183,19 +198,21 @@ class Worker(torch.multiprocessing.Process):
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
             policy_loss, value_loss, grad_norm = self.train(states, actions, rewards, dones, mus, next_state)
-            with self.lock:
-                self.logger.training_log(self.id,
-                                         self.iter,
-                                         policy_loss,
-                                         value_loss,
-                                         grad_norm,
-                                         self.global_model,
-                                         self.avg_model,
-                                         self.shared_optimizer,
-                                         on_policy=True,
-                                         np_rng_state=np.random.get_state(),
-                                         mem_rng_state=self.memory.get_rng_state(),
-                                         env_rng_state=self.env.get_rng_state())
+            self.iter_stats = utils.training_log(self.iter_stats,
+                                                 self.episode_stats,
+                                                 self.id,
+                                                 self.iter,
+                                                 policy_loss,
+                                                 value_loss,
+                                                 grad_norm,
+                                                 self.global_model,
+                                                 self.avg_model,
+                                                 self.shared_optimizer,
+                                                 np_rng_state=np.random.get_state(),
+                                                 mem_rng_state=self.memory.get_rng_state(),
+                                                 env_rng_state=self.env.get_rng_state(),
+                                                 on_policy=True,
+                                                 **self.config)
 
             n = np.random.poisson(self.config["replay_ratio"])
             pl, vl, g_norm = [], [], []
@@ -207,12 +224,15 @@ class Worker(torch.multiprocessing.Process):
                 pl.append(policy_loss)
                 vl.append(value_loss)
                 g_norm.append(grad_norm)
-            with self.lock:
-                self.logger.training_log(self.id,
-                                         self.iter,
-                                         sum(pl) / len(pl) if n != 0 else 0,
-                                         sum(vl) / len(vl) if n != 0 else 0,
-                                         sum(g_norm) / len(g_norm) if n != 0 else 0,
-                                         self.global_model,
-                                         self.avg_model,
-                                         self.shared_optimizer)
+
+                self.iter_stats = utils.training_log(self.iter_stats,
+                                                     self.episode_stats,
+                                                     self.id,
+                                                     self.iter,
+                                                     sum(pl) / len(pl) if n != 0 else 0,
+                                                     sum(vl) / len(vl) if n != 0 else 0,
+                                                     sum(g_norm) / len(g_norm) if n != 0 else 0,
+                                                     self.global_model,
+                                                     self.avg_model,
+                                                     self.shared_optimizer,
+                                                     **self.config)

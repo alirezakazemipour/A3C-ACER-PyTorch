@@ -1,4 +1,3 @@
-import numpy as np
 import datetime
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -7,155 +6,151 @@ import glob
 import psutil
 
 
-class Logger:
-    def __init__(self, **config):
-        self.config = config
-        self.log_dir = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        self.episode_stats = [dict(episode=0,
-                                   max_reward=-np.inf,
-                                   running_reward=0,
-                                   mem_len=0,
-                                   episode_len=0
-                                   ) for i in range(self.config["n_workers"])
-                              ]
-        self.iter_stats = [dict(iteration=0,
-                                running_ploss=0,
-                                running_vloss=0,
-                                running_grad_norm=0,
-                                np_rng_state=None,
-                                mem_rng_state=None,
-                                env_rng_state=None
-                                ) for i in range(self.config["n_workers"])
-                           ]
+def init_logger(**config):
+    config = config
+    log_dir = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
-        if self.config["do_train"] and self.config["train_from_scratch"]:
-            self.create_wights_folder(self.log_dir)
-            self.log_params()
+    if config["do_train"] and config["train_from_scratch"]:
+        create_wights_folder(log_dir)
+        _log_hyperparams(log_dir, **config)
+    return log_dir
 
-    @staticmethod
-    def create_wights_folder(dir):
-        if not os.path.exists("Models"):
-            os.mkdir("Models")
-        os.mkdir("Models/" + dir)
 
-    def log_params(self):
-        with SummaryWriter("Logs/" + self.log_dir) as writer:
-            for k, v in self.config.items():
-                writer.add_text(k, str(v))
+def create_wights_folder(dir):
+    if not os.path.exists("Models"):
+        os.mkdir("Models")
+    os.mkdir("Models/" + dir)
 
-    # region log hyperparameters
-    def _log_hyperparams(self):
-        with SummaryWriter("Logs/" + self.log_dir) as writer:
-            for k, v in self.config.items():
-                writer.add_text(k, str(v))
 
+# region log hyperparameters
+def _log_hyperparams(dir, **config):
+    with SummaryWriter("Logs/" + dir) as writer:
+        for k, v in config.items():
+            writer.add_text(k, str(v))
     # endregion
-    @staticmethod
-    def exp_avg(x, y):
-        return 0.99 * x + 0.01 * y
 
-    @staticmethod
-    def to_gb(in_bytes):
-        return in_bytes/ 1024 / 1024 / 1024
 
-    def episodic_log(self, id, episode, reward, mem_len, episode_len):
-        if episode == 1:
-            self.episode_stats[id]["running_reward"] = reward
-            self.episode_stats[id]["episode_len"] = episode_len
+def exp_avg(x, y):
+    return 0.99 * x + 0.01 * y
 
-        else:
-            self.episode_stats[id]["running_reward"] = self.exp_avg(self.episode_stats[id]["running_reward"], reward)
-            self.episode_stats[id]["episode_len"] = self.exp_avg(self.episode_stats[id]["episode_len"], episode_len)
 
-        self.episode_stats[id]["mem_len"] = mem_len
-        self.episode_stats[id]["episode"] = episode
-        self.episode_stats[id]["max_reward"] = max(self.episode_stats[id]["max_reward"], reward)
+def to_gb(in_bytes):
+    return in_bytes / 1024 / 1024 / 1024
 
-    def training_log(self, id,
-                     iteration,
-                     p_loss,
-                     v_loss,
-                     g_norm,
-                     g_model,
-                     avg_model,
-                     opt, on_policy=False,
-                     np_rng_state=None,
-                     mem_rng_state=None,
-                     env_rng_state=None):
 
-        if iteration == 0:
-            self.iter_stats[id]["running_ploss"] = p_loss
-            self.iter_stats[id]["running_vloss"] = v_loss
-            self.iter_stats[id]["running_grad_norm"] = g_norm
-        else:
-            self.iter_stats[id]["running_ploss"] = self.exp_avg(self.iter_stats[id]["running_ploss"], p_loss)
-            self.iter_stats[id]["running_vloss"] = self.exp_avg(self.iter_stats[id]["running_vloss"], v_loss)
-            self.iter_stats[id]["running_grad_norm"] = self.exp_avg(self.iter_stats[id]["running_grad_norm"], g_norm)
+def episodic_log(episode_stats, episode, reward, mem_len, episode_len):
+    if episode == 1:
+        episode_stats["running_reward"] = reward
+        episode_stats["episode_len"] = episode_len
+        episode_stats["mem_len"] = mem_len
+    else:
+        episode_stats["running_reward"] = exp_avg(episode_stats["running_reward"], reward)
+        episode_stats["episode_len"] = exp_avg(episode_stats["episode_len"], episode_len)
+        episode_stats["mem_len"] = exp_avg(episode_stats["mem_len"], mem_len)
 
-        self.iter_stats[id]["iteration"] = iteration
-        self.iter_stats[id]["np_rng_state"] = np_rng_state
-        self.iter_stats[id]["mem_rng_state"] = mem_rng_state
-        self.iter_stats[id]["env_rng_state"] = env_rng_state
+    episode_stats["episode"] = episode
+    episode_stats["max_reward"] = max(episode_stats["max_reward"], reward)
 
-        if id == 1 and on_policy:
+    return episode_stats
 
-            if iteration % (self.config["interval"] // 3) == 0:
-                self.save_params(g_model, avg_model, opt)
 
-            with SummaryWriter("Logs/" + self.log_dir) as writer:
-                writer.add_scalar("Max Reward", self.episode_stats[id]["max_reward"],
-                                       self.episode_stats[id]["episode"])
-                writer.add_scalar("Running Reward", self.episode_stats[id]["running_reward"],
-                                       self.episode_stats[id]["episode"])
-                writer.add_scalar("Episode length", self.episode_stats[id]["episode_len"],
-                                       self.episode_stats[id]["episode"])
-                writer.add_scalar("Running PG Loss", self.iter_stats[id]["running_ploss"], iteration)
-                writer.add_scalar("Running Value Loss", self.iter_stats[id]["running_vloss"], iteration)
-                writer.add_scalar("Running Grad Norm", self.iter_stats[id]["running_grad_norm"], iteration)
+def training_log(iter_stats,
+                 episode_stats,
+                 id,
+                 iteration,
+                 p_loss,
+                 v_loss,
+                 g_norm,
+                 g_model,
+                 avg_model,
+                 opt,
+                 np_rng_state=None,
+                 mem_rng_state=None,
+                 env_rng_state=None,
+                 on_policy=False,
+                 **config):
+    if iteration == 0:
+        iter_stats["running_ploss"] = p_loss
+        iter_stats["running_vloss"] = v_loss
+        iter_stats["running_grad_norm"] = g_norm
+    else:
+        iter_stats["running_ploss"] = exp_avg(iter_stats["running_ploss"], p_loss)
+        iter_stats["running_vloss"] = exp_avg(iter_stats["running_vloss"], v_loss)
+        iter_stats["running_grad_norm"] = exp_avg(iter_stats["running_grad_norm"], g_norm)
 
-            if iteration % self.config["interval"] == 0:
+    iter_stats["iteration"] = iteration
+    iter_stats["np_rng_state"] = np_rng_state
+    iter_stats["mem_rng_state"] = mem_rng_state
+    iter_stats["env_rng_state"] = env_rng_state
+
+    if on_policy:
+        if iteration % (config["interval"] // 3) == 0:
+            save_params(episode_stats, iter_stats, id, config["log_dir"], g_model, avg_model, opt)
+
+        if id == 0:
+            with SummaryWriter("Logs/" + config["log_dir"]) as writer:
+                writer.add_scalar("Max Reward", episode_stats["max_reward"],
+                                  episode_stats["episode"])
+                writer.add_scalar("Running Reward", episode_stats["running_reward"],
+                                  episode_stats["episode"])
+                writer.add_scalar("Episode length", episode_stats["episode_len"],
+                                  episode_stats["episode"])
+                writer.add_scalar("Running PG Loss", iter_stats["running_ploss"], iteration)
+                writer.add_scalar("Running Value Loss", iter_stats["running_vloss"], iteration)
+                writer.add_scalar("Running Grad Norm", iter_stats["running_grad_norm"], iteration)
+
+            if iteration % config["interval"] == 0:
                 ram = psutil.virtual_memory()
 
                 print("Iter: {}| "
                       "E: {}| "
                       "E_Running_Reward: {:.1f}| "
-                      "E_length:{:.1f}| "
-                      "Mem_length:{}| "
+                      "E_length: {:.1f}| "
+                      "Mem_length: {}| "
                       "{:.1f}/{:.1f} GB RAM| "
                       "Time:{} "
                       .format(iteration,
-                              self.episode_stats[id]["episode"],
-                              self.episode_stats[id]["running_reward"],
-                              self.episode_stats[id]["episode_len"],
-                              self.episode_stats[id]["mem_len"],
-                              self.to_gb(ram.used),
-                              self.to_gb(ram.total),
+                              episode_stats["episode"],
+                              episode_stats["running_reward"],
+                              episode_stats["episode_len"],
+                              episode_stats["mem_len"],
+                              to_gb(ram.used),
+                              to_gb(ram.total),
                               datetime.datetime.now().strftime("%H:%M:%S"),
                               )
                       )
+    return iter_stats
 
-    def save_params(self, g_model, avg_model, opt):
+
+def save_params(episode_stats, iter_stats, id, dir, g_model, avg_model, opt):
+    torch.save({"episode_stats": episode_stats,
+                "iter_stats": iter_stats
+                },
+               "Models/" + dir + "/" + str(id) + "_params.pth")
+    if id == 0:
         torch.save({"global_model_state_dict": g_model.state_dict(),
-                    "average_model_state_dict": avg_model.state_dict(),
+                    "avg_model_state_dict": avg_model.state_dict(),
                     "shared_optimizer_state_dict": opt.state_dict(),
-                    "episode_stats": self.episode_stats,
-                    "iter_stats": self.iter_stats
                     },
-                   "Models/" + self.log_dir + "/params.pth")
+                   "Models/" + dir + "/net_weights.pth")
 
-    def load_weights(self):
-        model_dir = glob.glob("Models/*")
-        model_dir.sort()
-        checkpoint = torch.load(model_dir[-1] + "/params.pth")
-        self.log_dir = model_dir[-1].split(os.sep)[-1]
 
-        self.episode_stats = checkpoint["episode_stats"]
-        self.iter_stats = checkpoint["iter_stats"]
+def load_weights(**config):
+    model_dir = glob.glob("Models/*")
+    log_dir = model_dir[-1].split(os.sep)[-1]
+    model_dir.sort()
 
-        a = [self.iter_stats[i]["np_rng_state"] for i in range(self.config["n_workers"])]
-        b = [self.iter_stats[i]["mem_rng_state"] for i in range(self.config["n_workers"])]
-        c = [self.iter_stats[i]["env_rng_state"] for i in range(self.config["n_workers"])]
+    checkpoints = []
+    for i in range(config["n_workers"]):
+        checkpoints.append(torch.load(model_dir[-1] + "/" + str(i) + "_params.pth"))
 
-        return checkpoint, [self.episode_stats[i]["episode"] for i in range(self.config["n_workers"])], \
-               [self.iter_stats[i]["iteration"] for i in range(self.config["n_workers"])], \
-               np.stack([a, b, c], axis=-1)
+    episode_stats = [checkpoint["episode_stats"] for checkpoint in checkpoints]
+    iter_stats = [checkpoint["iter_stats"] for checkpoint in checkpoints]
+
+    checkpoint = torch.load(model_dir[-1] + "/net_weights.pth")
+
+    a = [(iter_stats[i]["np_rng_state"], iter_stats[i]["mem_rng_state"], iter_stats[i]["env_rng_state"])
+         for i in range(config["n_workers"])
+         ]
+
+    return checkpoint, episode_stats, iter_stats, a, log_dir
