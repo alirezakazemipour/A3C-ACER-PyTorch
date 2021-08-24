@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import from_numpy
 from Utils import make_atari, make_state
+import Utils as utils
 
 
 class Worker(torch.multiprocessing.Process):
@@ -11,12 +12,10 @@ class Worker(torch.multiprocessing.Process):
                  global_model,
                  shared_optimizer,
                  lock,
-                 logger,
                  **config):
         super(Worker, self).__init__()
         self.id = id
         self.config = config
-        self.logger = logger
         self.seed = self.config["seed"] + self.id
         self.env = make_atari(self.config["env_name"], seed=self.seed)
         np.random.seed(self.seed)
@@ -31,6 +30,21 @@ class Worker(torch.multiprocessing.Process):
 
         self.episode = 0
         self.iter = 0
+
+        self.episode_stats = [dict(episode=0,
+                                   max_reward=-np.inf,
+                                   running_reward=0,
+                                   episode_len=0
+                                   ) for i in range(self.config["n_workers"])
+                              ]
+        self.iter_stats = [dict(iteration=0,
+                                running_ploss=0,
+                                running_vloss=0,
+                                running_grad_norm=0,
+                                np_rng_state=None,
+                                env_rng_state=None
+                                ) for i in range(self.config["n_workers"])
+                           ]
 
     def set_rng_state(self, *rng_state):
         np.random.set_state(rng_state[0])
@@ -85,8 +99,8 @@ class Worker(torch.multiprocessing.Process):
                     state = make_state(state, obs, True)
 
                     self.episode += 1
-                    with self.lock:
-                        self.logger.episodic_log(self.id, self.episode, episode_reward, step)
+                    self.episode_stats = utils.episodic_log(self.episode_stats, self.episode, episode_reward,
+                                                            step)
                     episode_reward = 0
 
                     if step % self.config["update_period"] == 0:
@@ -109,23 +123,24 @@ class Worker(torch.multiprocessing.Process):
             pg_loss = -(log_probs * advs.squeeze(1).detach()).mean()
             value_loss = self.mse_loss(values, returns)
 
-            total_loss = pg_loss - self.config["ent_coeff"] * dist.entropy().mean() +\
+            total_loss = pg_loss - self.config["ent_coeff"] * dist.entropy().mean() + \
                          self.config["critic_loss_coeff"] * value_loss
 
             total_loss.backward()
 
             grad_norm = torch.nn.utils.clip_grad_norm_(self.local_model.parameters(), self.config["max_grad_norm"])
             self.share_grads_to_global_models(self.local_model, self.global_model)
-
             self.shared_optimizer.step()
-            with self.lock:
-                self.logger.training_log(self.id,
-                                         self.iter,
-                                         pg_loss.item(),
-                                         value_loss.item(),
-                                         grad_norm.item(),
-                                         self.global_model,
-                                         self.shared_optimizer,
-                                         np_rng_state=np.random.get_state(),
-                                         env_rng_state=self.env.get_rng_state())
 
+            self.iter_stats = utils.training_log(self.iter_stats,
+                                                 self.episode_stats,
+                                                 self.id,
+                                                 self.iter,
+                                                 pg_loss.item(),
+                                                 value_loss.item(),
+                                                 grad_norm.item(),
+                                                 self.global_model,
+                                                 self.shared_optimizer,
+                                                 np_rng_state=np.random.get_state(),
+                                                 env_rng_state=self.env.get_rng_state(),
+                                                 **self.config)

@@ -1,7 +1,7 @@
 import gym
 from NN import Model, SharedAdam
 from Agent import Worker
-from Utils import Logger
+import Utils as utils
 from torch import multiprocessing as mp
 import os
 import torch
@@ -9,12 +9,11 @@ import yaml
 import argparse
 import numpy as np
 
-
 if __name__ == "__main__":
     with open("training_configs.yml") as f:
         params = yaml.load(f.read())
 
-    params.update({"n_workers": 3})
+    params.update({"n_workers": os.cpu_count()})
     params.update({"update_period": params["total_update_period"] // params["n_workers"]})
 
     if not isinstance(params["state_shape"], tuple):
@@ -59,28 +58,42 @@ if __name__ == "__main__":
     mp.set_start_method("spawn")
     lock = mp.Lock()
 
-    logger = Logger(**params)
+    log_dir = utils.init_logger(**params)
     if not params["train_from_scratch"]:
-        checkpoint, episodes, iterations, rng_states = logger.load_weights()
+        checkpoint, episode_stats, iter_stats, rng_states, log_dir = utils.load_weights(**params)
         global_model.load_state_dict(checkpoint["global_model_state_dict"])
         shared_opt.load_state_dict(checkpoint["shared_optimizer_state_dict"])
 
     else:
-        episodes = [0 for _ in range(params["n_workers"])]
-        iterations = [0 for _ in range(params["n_workers"])]
+        episode_stats = [dict(episode=0,
+                              max_reward=-np.inf,
+                              running_reward=0,
+                              episode_len=0
+                              ) for i in range(params["n_workers"])
+                         ]
+        iter_stats = [dict(iteration=0,
+                           running_ploss=0,
+                           running_vloss=0,
+                           running_grad_norm=0,
+                           np_rng_state=None,
+                           env_rng_state=None
+                           ) for i in range(params["n_workers"])
+                      ]
         rng_states = np.zeros((params["n_workers"], 2))
 
+    params.update({"log_dir": log_dir})
     workers = [Worker(id=i,
                       global_model=global_model,
                       shared_optimizer=shared_opt,
                       lock=lock,
-                      logger=logger,
                       **params) for i in range(params["n_workers"])
                ]
 
-    for worker, episode, iteration, rng_state in zip(workers, episodes, iterations, rng_states):
-        worker.episode = episode
-        worker.iter = iteration
+    for worker, episode_stat, iter_stat, rng_state in zip(workers, episode_stats, iter_stats, rng_states):
+        worker.episode_stats = episode_stat
+        worker.episode = episode_stat["episode"]
+        worker.iter_stats = iter_stat
+        worker.iter = iter_stat["iteration"]
         if not params["train_from_scratch"]:
             worker.set_rng_state(*rng_state)
         worker.start()
