@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description="Variable parameters based on the configuration of the machine or user's choice")
-    parser.add_argument("--env_name", default="BreakoutNoFrameskip-v4", type=str, help="Name of the environment.")
+    parser.add_argument("--env_name", default="PongNoFrameskip-v4", type=str, help="Name of the environment.")
     parser.add_argument("--interval", default=50, type=int,
                         help="The interval specifies how often different parameters should be saved and printed,"
                              " counted by episodes.")
@@ -56,7 +56,6 @@ if __name__ == "__main__":
     os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
 
     mp.set_start_method("spawn")
-    lock = mp.Lock()
 
     log_dir = utils.init_logger(**params)
     if not params["train_from_scratch"]:
@@ -85,7 +84,6 @@ if __name__ == "__main__":
     workers = [Worker(id=i,
                       global_model=global_model,
                       shared_optimizer=shared_opt,
-                      lock=lock,
                       **params) for i in range(params["n_workers"])
                ]
 

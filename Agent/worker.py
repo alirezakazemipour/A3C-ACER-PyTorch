@@ -11,7 +11,6 @@ class Worker(torch.multiprocessing.Process):
                  id,
                  global_model,
                  shared_optimizer,
-                 lock,
                  **config):
         super(Worker, self).__init__()
         self.id = id
@@ -26,7 +25,6 @@ class Worker(torch.multiprocessing.Process):
         self.global_model = global_model
         self.shared_optimizer = shared_optimizer
         self.mse_loss = torch.nn.MSELoss()
-        self.lock = lock
 
         self.episode = 0
         self.iter = 0
@@ -103,8 +101,8 @@ class Worker(torch.multiprocessing.Process):
                                                             step)
                     episode_reward = 0
 
-                    if step % self.config["update_period"] == 0:
-                        break
+                if step % self.config["update_period"] == 0:
+                   break
 
             _, R = self.get_actions_and_values(next_state)
             returns = []
