@@ -2,7 +2,7 @@ import numpy as np
 import gym
 
 
-def make_atari(env_id, episodic_life=True):
+def make_atari(env_id, episodic_life=True, seed=123):
     env = gym.make(env_id)
     assert 'NoFrameskip' in env.spec.id
 
@@ -14,6 +14,11 @@ def make_atari(env_id, episodic_life=True):
 
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
+
+    np.random.seed(seed)
+    env.seed(seed)
+    env.observation_space.np_random.seed(seed)
+    env.action_space.np_random.seed(seed)
 
     return env
 
@@ -35,6 +40,18 @@ class NoopResetEnv(gym.Wrapper):
             if done:
                 obs = self.env.reset()
         return obs
+
+    def get_rng_state(self):
+        env_rng = self.env.np_random.get_state()
+        env_obs_rng = self.env.observation_space.np_random.get_state()
+        env_ac_rng = self.env.action_space.np_random.get_state()
+        return np.random.get_state(), env_rng, env_obs_rng, env_ac_rng
+
+    def set_rng_state(self, *state):
+        np.random.set_state(state[0])
+        self.env.np_random.set_state(state[1])
+        self.env.observation_space.np_random.set_state(state[2])
+        self.env.action_space.np_random.set_state(state[3])
 
 
 class MaxAndSkipEnv(gym.Wrapper):

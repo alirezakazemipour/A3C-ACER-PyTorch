@@ -1,0 +1,8 @@
+---
+lr: 1.0e-4
+gamma: 0.99
+ent_coeff: 0.01
+critic_loss_coeff: 0.5
+state_shape: [4, 84, 84]
+max_grad_norm: 40
+total_update_period: 80
