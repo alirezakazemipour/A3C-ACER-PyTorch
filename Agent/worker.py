@@ -132,14 +132,14 @@ class Worker(torch.multiprocessing.Process):
         loss_q = self.config["critic_loss_coeff"] * self.mse_loss(q_ret, q_i)
 
         # trust region:
-        g = torch.autograd.grad(-(policy_loss - self.config["ent_coeff"] * ent), f)[0]
+        g = torch.autograd.grad(-(policy_loss - self.config["ent_coeff"] * ent) * self.config["k"], f)[0]
         k = -f_avg / (f.detach() + self.eps)
         k_dot_g = torch.sum(k * g, dim=-1, keepdim=True)
 
         adj = torch.max(torch.zeros_like(k_dot_g),
                         (k_dot_g - self.config["delta"]) / (torch.sum(k.square(), dim=-1, keepdim=True) + self.eps))
 
-        grads_f = -(g - adj * k)
+        grads_f = -(g - adj * k) / self.config["k"]
         f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 

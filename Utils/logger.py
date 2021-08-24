@@ -107,7 +107,7 @@ def training_log(iter_stats,
                       "E_length: {:.1f}| "
                       "Mem_length: {}| "
                       "{:.1f}/{:.1f} GB RAM| "
-                      "Time:{} "
+                      "Time: {} "
                       .format(iteration,
                               episode_stats["episode"],
                               episode_stats["running_reward"],
