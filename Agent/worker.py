@@ -56,17 +56,15 @@ class Worker(torch.multiprocessing.Process):
         return action.numpy(), q_values.numpy(), probs.numpy()
 
     def sync_thread_spec_params(self):
-        with self.lock:
-            self.local_model.load_state_dict(self.global_model.state_dict())
+        # with self.lock:
+        self.local_model.load_state_dict(self.global_model.state_dict())
 
-    def update_shared_model(self, grads, model):
-        with self.lock:
-            for gradient, param in zip(grads, model.parameters()):
-                param._grad = gradient
-
-            self.shared_optimizer.step()
-            for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
-                avg_param.data.copy_(self.tau * global_param.data + (1 - self.tau) * avg_param.data)
+    @staticmethod
+    def share_grads_to_global_models(local_model, global_model):
+        for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
+            if global_param.grad is not None:
+                return
+            global_param._grad = local_param.grad
 
     def q_retrace(self, rewards, dones, q_values, values, next_value, rho_i):
         q_ret = next_value
@@ -133,9 +131,15 @@ class Worker(torch.multiprocessing.Process):
         f.backward(grads_f, retain_graph=True)
         loss_q.backward()
 
-        grads = [param.grad for param in self.local_model.parameters()]
-        self.update_shared_model(grads, self.global_model)
-        return (f * grads_f).mean().item(), loss_q.item()
+        # grads = [param.grad for param in self.local_model.parameters()]
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.local_model.parameters(), self.config["max_grad_norm"])
+        self.share_grads_to_global_models(self.local_model, self.global_model)
+        self.shared_optimizer.step()
+
+        for avg_param, global_param in zip(self.avg_model.parameters(), self.global_model.parameters()):
+            avg_param.data.copy_(self.tau * global_param.data + (1 - self.tau) * avg_param.data)
+
+        return (f * grads_f).mean().item(), loss_q.item(), grad_norm.item()
 
     def run(self):
         print(f"Worker: {self.id} started.")
@@ -178,12 +182,13 @@ class Worker(torch.multiprocessing.Process):
             trajectory = dict(states=states, actions=actions, rewards=rewards,
                               dones=dones, mus=mus, next_state=next_state)
             self.memory.add(**trajectory)
-            policy_loss, value_loss = self.train(states, actions, rewards, dones, mus, next_state)
+            policy_loss, value_loss, grad_norm = self.train(states, actions, rewards, dones, mus, next_state)
             with self.lock:
                 self.logger.training_log(self.id,
                                          self.iter,
                                          policy_loss,
                                          value_loss,
+                                         grad_norm,
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer,
@@ -193,19 +198,21 @@ class Worker(torch.multiprocessing.Process):
                                          env_rng_state=self.env.get_rng_state())
 
             n = np.random.poisson(self.config["replay_ratio"])
-            pl, vl = [], []
+            pl, vl, g_norm = [], [], []
             for _ in range(n):
                 self.shared_optimizer.zero_grad()
                 self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-                policy_loss, value_loss = self.train(*self.memory.sample())
+                policy_loss, value_loss, grad_norm = self.train(*self.memory.sample())
                 pl.append(policy_loss)
                 vl.append(value_loss)
+                g_norm.append(grad_norm)
             with self.lock:
                 self.logger.training_log(self.id,
                                          self.iter,
-                                         sum(pl) / sum(pl) if n != 0 else 0,
-                                         sum(vl) / sum(vl) if n != 0 else 0,
+                                         sum(pl) / len(pl) if n != 0 else 0,
+                                         sum(vl) / len(vl) if n != 0 else 0,
+                                         sum(g_norm) / len(g_norm) if n != 0 else 0,
                                          self.global_model,
                                          self.avg_model,
                                          self.shared_optimizer)

@@ -21,6 +21,7 @@ class Logger:
         self.iter_stats = [dict(iteration=0,
                                 running_ploss=0,
                                 running_vloss=0,
+                                running_grad_norm=0,
                                 np_rng_state=None,
                                 mem_rng_state=None,
                                 env_rng_state=None
@@ -74,7 +75,9 @@ class Logger:
                      iteration,
                      p_loss,
                      v_loss,
-                     g_model, avg_model,
+                     g_norm,
+                     g_model,
+                     avg_model,
                      opt, on_policy=False,
                      np_rng_state=None,
                      mem_rng_state=None,
@@ -83,9 +86,11 @@ class Logger:
         if iteration == 0:
             self.iter_stats[id]["running_ploss"] = p_loss
             self.iter_stats[id]["running_vloss"] = v_loss
+            self.iter_stats[id]["running_grad_norm"] = g_norm
         else:
             self.iter_stats[id]["running_ploss"] = self.exp_avg(self.iter_stats[id]["running_ploss"], p_loss)
             self.iter_stats[id]["running_vloss"] = self.exp_avg(self.iter_stats[id]["running_vloss"], v_loss)
+            self.iter_stats[id]["running_grad_norm"] = self.exp_avg(self.iter_stats[id]["running_grad_norm"], g_norm)
 
         self.iter_stats[id]["iteration"] = iteration
         self.iter_stats[id]["np_rng_state"] = np_rng_state
@@ -106,6 +111,7 @@ class Logger:
                                        self.episode_stats[id]["episode"])
                 writer.add_scalar("Running PG Loss", self.iter_stats[id]["running_ploss"], iteration)
                 writer.add_scalar("Running Value Loss", self.iter_stats[id]["running_vloss"], iteration)
+                writer.add_scalar("Running Grad Norm", self.iter_stats[id]["running_grad_norm"], iteration)
 
             if iteration % self.config["interval"] == 0:
                 ram = psutil.virtual_memory()
