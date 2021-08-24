@@ -56,7 +56,6 @@ class Worker(torch.multiprocessing.Process):
 
     def run(self):
         print(f"Worker: {self.id} started.")
-        running_reward = 0
         state = np.zeros(self.config["state_shape"], dtype=np.uint8)
         obs = self.env.reset()
         state = make_state(state, obs, True)
@@ -124,7 +123,7 @@ class Worker(torch.multiprocessing.Process):
                                          self.iter,
                                          pg_loss.item(),
                                          value_loss.item(),
-                                         grad_norm,
+                                         grad_norm.item(),
                                          self.global_model,
                                          self.shared_optimizer,
                                          np_rng_state=np.random.get_state(),

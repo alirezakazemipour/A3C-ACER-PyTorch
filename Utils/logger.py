@@ -144,8 +144,8 @@ class Logger:
         self.iter_stats = checkpoint["iter_stats"]
 
         a = [self.iter_stats[i]["np_rng_state"] for i in range(self.config["n_workers"])]
-        c = [self.iter_stats[i]["env_rng_state"] for i in range(self.config["n_workers"])]
+        b = [self.iter_stats[i]["env_rng_state"] for i in range(self.config["n_workers"])]
 
         return checkpoint, [self.episode_stats[i]["episode"] for i in range(self.config["n_workers"])], \
                [self.iter_stats[i]["iteration"] for i in range(self.config["n_workers"])], \
-               np.stack([a, c], axis=-1)
+               np.stack([a, b], axis=-1)

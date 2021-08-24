@@ -14,8 +14,7 @@ if __name__ == "__main__":
     with open("training_configs.yml") as f:
         params = yaml.load(f.read())
 
-    params.update({"n_workers": os.cpu_count()})
-    params.update({"mem_size": int(params["total_memory_size"]) // params["n_workers"] // params["k"]})
+    params.update({"n_workers": 3})
     params.update({"update_period": params["total_update_period"] // params["n_workers"]})
 
     if not isinstance(params["state_shape"], tuple):
