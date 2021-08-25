@@ -1,3 +1,5 @@
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)  
+
 # A3C-ACER-PyTorch
 
 This repository contains **PyTorch Implementation** of papers **Sample Efficient Actor-Critic with Experience Replay** (a.k.a **ACER**) and, **Asynchronous Methods for Deep Reinforcement Learning** (a.ka. **A3C**.)
@@ -62,3 +64,16 @@ max grad norm| 40
 ```bash
 pip3 install -r requirements.txt
 ```
+
+## Reference
+
+1. [_Sample Efficient Actor-Critic with Experience Replay_, Wang et al., 2016](https://arxiv.org/abs/1611.01224)
+2.  [_Asynchronous Methods for Deep Reinforcement Learning_, Mnih et al., 2016](https://arxiv.org/abs/1602.01783)
+3.  [_OpenAI Baselines: ACKTR & A2C_](https://openai.com/blog/baselines-acktr-a2c/)
+
+## Acknowledgement
+Current code was inspired by following implementation **especially the first one**:
+1. [acer](https://github.com/openai/baselines/tree/master/baselines/acer) by [@OpenAI](https://github.com/openai).
+2. [ACER](https://github.com/Kaixhin/ACER) by [@Kaixhin ](https://github.com/Kaixhin).
+3. [acer](https://github.com/dchetelat/acer) by [@dchetelat ](https://github.com/dchetelat).
+4. [ACER_tf](https://github.com/hercky/ACER_tf) by [@hercky](https://github.com/hercky).
