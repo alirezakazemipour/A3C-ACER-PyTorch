@@ -131,7 +131,6 @@ dmypy.json
 .idea/
 *.pth
 *.avi
-*.png
 events.*
 *.json
 *.mp4

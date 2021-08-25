@@ -26,6 +26,14 @@ Also, the ACER utilizes more advanced techniques like Truncated Importance Sampl
 > number of parallel agents = 8.
 >  x-axis corresponds episode number.
 
+ACER's Output| ACER's Output
+:-----------------------:|:-----------------------:
+![](Readme files/Gifs/SpaceInvaders.gif)| ![](Readme files/Gifs/Breakout.gif)
+Running Episode Reward|Running Episode Reward
+![](Readme files/Plots/SpaceInvaders_reward.png)| ![](Readme files/Plots/Breakout_reward.png) 
+Running Episode Length|Running Episode Length
+![](Readme files/Plots/SpaceInvaders_ep_len.png)| ![](Readme files/Plots/Breakout_ep_len.png) 
+
 ### Comparison
 
 > number of parallel agents = 2
