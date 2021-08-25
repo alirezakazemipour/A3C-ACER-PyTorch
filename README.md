@@ -34,6 +34,7 @@ Also, the ACER utilizes more advanxed techniques like Truncated Impotance Sampli
 - The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of 21 has been achieved X episodes vs. Y episode of the Recurrent A3C on the right.
 
 ## Table of Hyperparameters
+
 Parameter| Value
 :-----------------------:|:-----------------------:|
 lr			     | 1e-4
@@ -61,9 +62,29 @@ max grad norm| 40
 - torch == 1.6.0
 
 ## Installation
+
 ```bash
 pip3 install -r requirements.txt
 ```
+
+## Usage
+
+### How to Run
+
+### Hardware Requirments
+
+## Tested Environments
+
+- [x] PongNoFrameskip-v4
+- [x] BreakoutNoFrameskip-v4
+- [x] SpaceInvadersNoFrameskip-v4
+- [ ] AssaultNoFrameskip-v4
+
+## TODOs
+- [ ] Verify and add results of the Continuous version of ACER
+- [ ] Verify and add results of the Continuous version of A3C
+
+## Structure
 
 ## Reference
 
@@ -72,8 +93,9 @@ pip3 install -r requirements.txt
 3.  [_OpenAI Baselines: ACKTR & A2C_](https://openai.com/blog/baselines-acktr-a2c/)
 
 ## Acknowledgement
+
 Current code was inspired by following implementation **especially the first one**:
-1. [acer](https://github.com/openai/baselines/tree/master/baselines/acer) by [@OpenAI](https://github.com/openai).
-2. [ACER](https://github.com/Kaixhin/ACER) by [@Kaixhin ](https://github.com/Kaixhin).
-3. [acer](https://github.com/dchetelat/acer) by [@dchetelat ](https://github.com/dchetelat).
-4. [ACER_tf](https://github.com/hercky/ACER_tf) by [@hercky](https://github.com/hercky).
+1. [acer](https://github.com/openai/baselines/tree/master/baselines/acer) by [@OpenAI](https://github.com/openai)
+2. [ACER](https://github.com/Kaixhin/ACER) by [@Kaixhin ](https://github.com/Kaixhin)
+3. [acer](https://github.com/dchetelat/acer) by [@dchetelat ](https://github.com/dchetelat)
+4. [ACER_tf](https://github.com/hercky/ACER_tf) by [@hercky](https://github.com/hercky)
