@@ -10,12 +10,12 @@ The A3C paper introduced some key ideas that can be summarized into:
 3. An updating scheme that operates on fixed-length segments of experiences (say, 5 or 20 time steps) that increase stationarity of the agent's data.
 
 **But:**
-A3C's lack of Experience Replay means it is considerably Sample-Inefficient and the number of interactions with the enviroment, needed to solve the task, is consequently **high**.
+A3C's lack of Experience Replay means it is considerably Sample-Inefficient and the number of interactions with the environment, needed to solve the task, is consequently **high**.
 
 Based on this deficit of the A3C, ACER introduces an actor-critic method upon A3C's core structure  accompanied by benefits of having thread-based  Experience Replays to improve sample efficiency. 
 More precisely, in the ACER algorithm, each of the parallel agents on the one hand, performs A3C-like on-policy updates and on the other, has its own Experience Replay buffer to perform off-policy updates.
 
-Also, the ACER utilizes more advanxed techniques like Truncated Impotance Sampling with Bias Correction, Stochastic Dueling Network Architectures and, Efficient Trust Region Policy Optimization to further improve stability (which is a common challenge in Policy Gradient methods) and also helps increasing Sample Efficiency even more.
+Also, the ACER utilizes more advanced techniques like Truncated Importance Sampling with Bias Correction, Stochastic Dueling Network Architectures and, Efficient Trust Region Policy Optimization to further improve stability (which is a common challenge in Policy Gradient methods) and also helps increasing Sample Efficiency even more.
 
 **This repository contains the discrete implementation of the ACER [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch) and the A3C's [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/A3C_Atari) **.
 
@@ -70,8 +70,32 @@ pip3 install -r requirements.txt
 ## Usage
 
 ### How to Run
+```bash
+usage: main.py [-h] [--env_name ENV_NAME] [--interval INTERVAL] [--do_train]
+               [--train_from_scratch] [--seed SEED]
 
-### Hardware Requirments
+Variable parameters based on the configuration of the machine or user's choice
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --env_name ENV_NAME   Name of the environment.
+  --interval INTERVAL   The interval specifies how often different parameters
+                        should be saved and printed, counted by episodes.
+  --do_train            The flag determines whether to train the agent or play with it.
+  --train_from_scratch  The flag determines whether to train from scratch or continue previous tries.
+  --seed SEED           The randomness' seed for torch, numpy, random & gym[env].
+```
+- **In order to train the agent with default arguments , execute the following command and use `--do_train` flag, otherwise the agent would be tested** (You may change the environment and random seed based on your desire.):
+```shell
+python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200
+```
+- **If you want to keep training your previous run, execute the following (add `--train_from_scratch` flag):**
+```shell
+python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200 --train_from_scratch
+```
+### Hardware Requirements
+- All runs with 8 parallel agents were carried out on [paperspace.com](https://www.paperspace.com/) [Free-GPU, 8 Cores, 30 GB RAM].
+- All runs with 8 parallel agents were carried out on [Google Colab](https://colab.research.google.com) [CPU Runtime, 2 Cores, 12 GB RAM].
 
 ## Tested Environments
 
