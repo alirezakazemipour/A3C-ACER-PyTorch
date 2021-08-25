@@ -139,8 +139,8 @@ def save_params(episode_stats, iter_stats, id, dir, g_model, avg_model, opt):
 
 def load_weights(**config):
     model_dir = glob.glob("Models/*")
-    log_dir = model_dir[-1].split(os.sep)[-1]
     model_dir.sort()
+    log_dir = model_dir[-1].split(os.sep)[-1]
 
     checkpoints = []
     for i in range(config["n_workers"]):
@@ -152,7 +152,6 @@ def load_weights(**config):
     checkpoint = torch.load(model_dir[-1] + "/net_weights.pth")
 
     a = [(iter_stats[i]["np_rng_state"], iter_stats[i]["mem_rng_state"], iter_stats[i]["env_rng_state"])
-         for i in range(config["n_workers"])
-         ]
+         for i in range(config["n_workers"])]
 
     return checkpoint, episode_stats, iter_stats, a, log_dir

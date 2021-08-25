@@ -2,6 +2,7 @@ import gym
 from NN import Model, SharedAdam
 from Agent import Worker
 import Utils as utils
+from Utils import Play
 from torch import multiprocessing as mp
 import torch
 import os
@@ -60,54 +61,67 @@ if __name__ == "__main__":
     for p in avg_model.parameters():
         p.requires_grad = False
 
-    os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
-    os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
-
-    mp.set_start_method("spawn")
-
     log_dir = utils.init_logger(**params)
-    if not params["train_from_scratch"]:
-        checkpoint, episode_stats, iter_stats, rng_states, log_dir = utils.load_weights(**params)
-        global_model.load_state_dict(checkpoint["global_model_state_dict"])
-        avg_model.load_state_dict(checkpoint["avg_model_state_dict"])
-        shared_opt.load_state_dict(checkpoint["shared_optimizer_state_dict"])
 
-    else:
-        episode_stats = [dict(episode=0,
-                              max_reward=-np.inf,
-                              running_reward=0,
-                              episode_len=0,
-                              mem_len=0,
-                              reward=0
-                              ) for i in range(params["n_workers"])
-                         ]
-        iter_stats = [dict(iteration=0,
-                           running_ploss=0,
-                           running_vloss=0,
-                           running_grad_norm=0,
-                           np_rng_state=None,
-                           env_rng_state=None,
-                           mem_rng_state=None
-                           ) for i in range(params["n_workers"])
-                      ]
-        rng_states = np.zeros((params["n_workers"], 3))
+    if params["do_train"]:
+        os.environ["OMP_NUM_THREADS"] = "1"  # make sure numpy uses only one thread for each process
+        os.environ["CUDA_VISABLE_DEVICES"] = ""  # make sure not to use gpu
 
-    params.update({"log_dir": log_dir})
-    workers = [Worker(id=i,
-                      global_model=global_model,
-                      avg_model=avg_model,
-                      shared_optimizer=shared_opt,
-                      **params) for i in range(params["n_workers"])
-               ]
+        mp.set_start_method("spawn")
 
-    for worker, episode_stat, iter_stat, rng_state in zip(workers, episode_stats, iter_stats, rng_states):
-        worker.episode_stats = episode_stat
-        worker.episode = episode_stat["episode"]
-        worker.iter_stats = iter_stat
-        worker.iter = iter_stat["iteration"]
         if not params["train_from_scratch"]:
-            worker.set_rng_state(*rng_state)
-        worker.start()
+            checkpoint, episode_stats, iter_stats, rng_states, log_dir = utils.load_weights(**params)
+            global_model.load_state_dict(checkpoint["global_model_state_dict"])
+            avg_model.load_state_dict(checkpoint["avg_model_state_dict"])
+            shared_opt.load_state_dict(checkpoint["shared_optimizer_state_dict"])
 
-    for worker in workers:
-        worker.join()
+        else:
+            episode_stats = [dict(episode=0,
+                                  max_reward=-np.inf,
+                                  running_reward=0,
+                                  episode_len=0,
+                                  mem_len=0,
+                                  reward=0
+                                  ) for i in range(params["n_workers"])
+                             ]
+            iter_stats = [dict(iteration=0,
+                               running_ploss=0,
+                               running_vloss=0,
+                               running_grad_norm=0,
+                               np_rng_state=None,
+                               env_rng_state=None,
+                               mem_rng_state=None
+                               ) for i in range(params["n_workers"])
+                          ]
+            rng_states = np.zeros((params["n_workers"], 3))
+
+        params.update({"log_dir": log_dir})
+        workers = [Worker(id=i,
+                          global_model=global_model,
+                          avg_model=avg_model,
+                          shared_optimizer=shared_opt,
+                          **params) for i in range(params["n_workers"])
+                   ]
+
+        for worker, episode_stat, iter_stat, rng_state in zip(workers, episode_stats, iter_stats, rng_states):
+            worker.episode_stats = episode_stat
+            worker.episode = episode_stat["episode"]
+            worker.iter_stats = iter_stat
+            worker.iter = iter_stat["iteration"]
+            if not params["train_from_scratch"]:
+                worker.set_rng_state(*rng_state)
+            worker.start()
+
+        for worker in workers:
+            worker.join()
+    else:
+        params["n_workers"] = 0
+        checkpoint, *_ = utils.load_weights(**params)
+        global_model.load_state_dict(checkpoint["global_model_state_dict"])
+        agent = Worker(id=0,
+                       global_model=global_model,
+                       avg_model=None,
+                       shared_optimizer=None,
+                       **params)
+        play = Play(agent, **params)
+        play.evaluate()

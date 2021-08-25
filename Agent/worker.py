@@ -231,3 +231,7 @@ class Worker(torch.multiprocessing.Process):
                                                      sum(g_norm) / len(g_norm) if n != 0 else 0,
                                                      None, None, None
                                                      )
+
+    def prepare_to_play(self):
+        self.local_model.load_state_dict(self.global_model.state_dict())
+        self.local_model.eval()
