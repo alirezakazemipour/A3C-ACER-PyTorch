@@ -133,3 +133,5 @@ dmypy.json
 *.avi
 *.png
 events.*
+*.json
+*.mp4

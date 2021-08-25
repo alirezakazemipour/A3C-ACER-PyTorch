@@ -7,8 +7,8 @@ import time
 class Play:
     def __init__(self, agent, max_episode=1, **config):
         self.config = config
-        self.env = make_atari(self.config["env_name"], seed=int(time.time()))
-        self.env = self.env = gym.wrappers.Monitor(self.env, "./Vid", video_callable=lambda episode_id: True, force=True)
+        self.env = make_atari(self.config["env_name"], episodic_life=False, seed=int(time.time()))
+        self.env = gym.wrappers.Monitor(self.env, "./Vid", video_callable=lambda episode_id: True, force=True)
         self.max_episode = max_episode
         self.agent = agent
         self.agent.prepare_to_play()
@@ -18,7 +18,7 @@ class Play:
         total_reward = 0
         print("--------Play mode--------")
         for _ in range(self.max_episode):
-            done = 0
+            done = False
             obs = self.env.reset()
             episode_reward = 0
             state = make_state(state, obs, True)
