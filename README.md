@@ -23,8 +23,10 @@ Also, the ACER utilizes more advanced techniques like Truncated Importance Sampl
 
 ## Results
 
-> number of parallel agents = 8.
->  x-axis corresponds episode number.
+> number of parallel agents = 8.  
+> x-axis corresponds episode number.
+
+
 
 ACER's Output| ACER's Output
 :-----------------------:|:-----------------------:
@@ -36,8 +38,10 @@ Running Episode Length|Running Episode Length
 
 ### Comparison
 
-> number of parallel agents = 2
+> number of parallel agents = 2  
 >  x-axis corresponds episode number.
+
+
 
 - The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of 21 has been achieved X episodes vs. Y episode of the Recurrent A3C on the right.
 
