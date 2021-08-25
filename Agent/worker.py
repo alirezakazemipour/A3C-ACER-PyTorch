@@ -48,13 +48,13 @@ class Worker(torch.multiprocessing.Process):
         np.random.set_state(rng_state[0])
         self.env.set_rng_state(*rng_state[1])
 
-    def get_actions_and_values(self, state):
+    def get_actions_and_values(self, state, hx, cx):
         state = np.expand_dims(state, 0)
         state = from_numpy(state).byte()
         with torch.no_grad():
-            dist, value = self.local_model(state)
+            dist, value, (hx, cx) = self.local_model(state, hx, cx)
             action = dist.sample()
-        return action.numpy(), value.numpy().squeeze()
+        return action.numpy(), value.numpy().squeeze(), (hx, cx)
 
     def sync_thread_spec_params(self):
         self.local_model.load_state_dict(self.global_model.state_dict())
@@ -74,25 +74,29 @@ class Worker(torch.multiprocessing.Process):
         next_state = None
         episode_reward = 0
         episode_len = 0
+        hx, cx = torch.zeros((1, 256)), torch.zeros((1, 256))
         while True:
             self.iter += 1
             self.shared_optimizer.zero_grad()  # Reset global gradients
             self.sync_thread_spec_params()  # Synchronize thread-specific parameters
 
-            states, actions, rewards, dones = [], [], [], []
+            states, actions, rewards, dones, hxs, cxs = [], [], [], [], [], []
             for step in range(1, 1 + self.config["max_episode_steps"]):
                 episode_len += 1
-                action, _ = self.get_actions_and_values(state)
+                action, _, (next_hx, next_cx) = self.get_actions_and_values(state, hx, cx)
                 next_obs, reward, done, _ = self.env.step(action)
                 # self.env.render()
                 states.append(state)
                 actions.append(action)
                 rewards.append(np.sign(reward))
                 dones.append(done)
+                hxs.append(hx)
+                cxs.append(cx)
 
                 episode_reward += reward
                 next_state = make_state(state, next_obs, False)
                 state = next_state
+                hx, cx = next_hx, next_cx
 
                 if done:
                     obs = self.env.reset()
@@ -105,11 +109,12 @@ class Worker(torch.multiprocessing.Process):
                                                             episode_len)
                     episode_reward = 0
                     episode_len = 0
+                    hx, cx = torch.zeros((1, 256)), torch.zeros((1, 256))
 
                 if step % self.config["update_period"] == 0:
                     break
 
-            _, R = self.get_actions_and_values(next_state)
+            _, R, _ = self.get_actions_and_values(next_state, next_hx, next_cx)
             returns = []
             for r, d in zip(rewards[::-1], dones[::-1]):
                 R = r + self.config["gamma"] * R * (1 - d)
@@ -118,8 +123,10 @@ class Worker(torch.multiprocessing.Process):
             states = torch.Tensor(states).view(-1, *self.config["state_shape"])
             actions = torch.Tensor(actions)
             returns = torch.Tensor(returns).view(-1, 1)
+            hxs = torch.cat(hxs)
+            cxs = torch.cat(cxs)
 
-            dist, values = self.local_model(states)
+            dist, values, _ = self.local_model(states, hxs, cxs)
             log_probs = dist.log_prob(actions.squeeze(1))
             advs = returns - values
 

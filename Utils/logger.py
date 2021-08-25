@@ -128,8 +128,8 @@ def save_params(episode_stats, iter_stats, id, dir, g_model, opt):
 
 def load_weights(**config):
     model_dir = glob.glob("Models/*")
-    log_dir = model_dir[-1].split(os.sep)[-1]
     model_dir.sort()
+    log_dir = model_dir[-1].split(os.sep)[-1]
 
     checkpoints = []
     for i in range(config["n_workers"]):

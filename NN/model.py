@@ -23,7 +23,7 @@ class Model(nn.Module, ABC):
 
         flatten_size = conv2_out_w * conv2_out_h * 32
 
-        self.fc = nn.Linear(in_features=flatten_size, out_features=256)
+        self.lstm = nn.LSTMCell(flatten_size, 256)
         self.value = nn.Linear(in_features=256, out_features=1)
         self.logits = nn.Linear(in_features=256, out_features=self.n_actions)
 
@@ -32,25 +32,30 @@ class Model(nn.Module, ABC):
                 nn.init.kaiming_normal_(layer.weight, nonlinearity="relu")
                 layer.bias.data.zero_()
 
-        nn.init.kaiming_normal_(self.fc.weight, nonlinearity="relu")
-        self.fc.bias.data.zero_()
+        for name, param in self.lstm.named_parameters():
+            if 'bias' in name:
+                param.data.zero_()
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
         nn.init.xavier_uniform_(self.value.weight)
         self.value.bias.data.zero_()
         nn.init.xavier_uniform_(self.logits.weight)
         self.logits.bias.data.zero_()
 
-    def forward(self, inputs):
+    def forward(self, inputs, hx, cx):
         x = inputs / 255.
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = x.contiguous()
         x = x.view(x.size(0), -1)
-        x = F.relu(self.fc(x))
+        hx, cx = self.lstm(x, (hx, cx))
+        x = hx
         value = self.value(x)
         probs = F.softmax(self.logits(x), dim=1)
         dist = Categorical(probs)
 
-        return dist, value
+        return dist, value, (hx, cx)
 
     @staticmethod
     def conv_shape(input, kernel_size, stride, padding=0):
