@@ -22,7 +22,6 @@ Also, the ACER utilizes more advanced techniques like Truncated Importance Sampl
 >However, continuous implementations are also provided [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/ACER_Continuous) for the ACER and [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/A3C_Continuous) for A3C, they have not been tested yet and they will be added to the current work whenever they're suitably debugged and validated in the future.
 
 ## Results
-
 > number of parallel agents = 8.  
 > x-axis corresponds episode number.
 
@@ -40,8 +39,16 @@ Running Episode Length| Running Episode Length
 >  x-axis corresponds episode number.
 
 
+ACER's Output| Recurrent A3C's Output
+:-----------------------:|:-----------------------:
+![](Readme%20files/Gifs/PongACER.gif)| ![](Readme%20files/Gifs/PongRecurrentA3C.gif)
+Running Episode Reward| Running Episode Reward
+![](Readme%20files/Plots/PongACER_reward.png)| ![](Readme%20files/Plots/PongRecurrentA3C_reward.png) 
+Running Episode Length| Running Episode Length
+![](Readme%20files/Plots/PongACER_ep_len.png)| ![](Readme%20files/Plots/PongRecurrentA3C_ep_len.png) 
 
-- The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of 21 has been achieved X episodes vs. Y episode of the Recurrent A3C on the right.
+
+- The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of &cong; 21 has been achieved 600 episodes vs. Y episode of the Recurrent A3C on the right.
 
 ## Table of Hyperparameters
 Parameter| Value
