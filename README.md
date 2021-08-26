@@ -9,7 +9,7 @@ The A3C paper introduced some key ideas that can be summarized into:
 2. Architectures that share layers between the policy and value function. Thus, providing better and more efficient representation learning and feature extraction.
 3. An updating scheme that operates on fixed-length segments of experiences (say, 5 or 20 time steps) that increase stationarity of the agent's data.
 
-**But:**
+**But:**  
 A3C's lack of Experience Replay means it is considerably Sample-Inefficient and the number of interactions with the environment, needed to solve the task, is consequently **high**.
 
 Based on this deficit of the A3C, ACER introduces an actor-critic method upon A3C's core structure  accompanied by benefits of having thread-based  Experience Replays to improve sample efficiency. 
@@ -104,7 +104,7 @@ python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200 --trai
 ```
 
 ### Pre-Trained Weights
-- There are pre-trained weights of the agents that were shown in the [Results section](#Results) playing, if you want to test them by your self, please do the following:
+- There are pre-trained weights of the agents that were shown in the [Results](#Results)  section playing, if you want to test them by your self, please do the following:
 1. First extract your desired weight from `*tar.xz` format to get `.pth` extension then, rename your _env_name_ + _net_weights.pth_ file to _net_weights.pth_. For example: `Breakout_net_weights.pth` -> `net_weights.pth`
 2. Create a folder named _Models_  in the root directory of the project and **make sure it is empty**.
 3. Create an other folder with an arbitrary name inside _Models_ folder. For example:  
