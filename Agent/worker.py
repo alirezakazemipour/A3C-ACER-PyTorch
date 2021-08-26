@@ -154,3 +154,7 @@ class Worker(torch.multiprocessing.Process):
                                                  np_rng_state=np.random.get_state(),
                                                  env_rng_state=self.env.get_rng_state(),
                                                  **self.config)
+
+    def prepare_to_play(self):
+        self.local_model.load_state_dict(self.global_model.state_dict())
+        self.local_model.eval()
