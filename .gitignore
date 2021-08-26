@@ -129,11 +129,3 @@ dmypy.json
 .pyre/
 
 .idea/
-*.pth
-*.avi
-*.png
-events.*
-*.json
-*.mp4
-Vid/
-*.gif
