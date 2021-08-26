@@ -1,37 +1,14 @@
 import gym
-from model import Actor, Critic
-from shared_optimizer import SharedAdam
-from worker import Worker
-from torch import multiprocessing as mp
-import mujoco_py
+from NN import Actor, Critic, SharedAdam
+from Agent import Worker
 
-env_name = "Walker2d-v2"
-n_workers = 6
-lr = 5e-4
+env_name = "Pendulum-v0"
+n_workers = 2
+lr = 1e-4
 gamma = 0.9
 ent_coeff = 1e-4
 n_hiddens = 256
-
-
-def run_workers(worker, lock):
-    worker.step(lock)
-
-
-def update_shared_model(queue, lock, actor_opt, critic_opt, actor, critic):
-    while True:
-        actor_grads, critic_grads, id = queue.get()
-        # print(f"grads of worker:{id}")
-        with lock:
-            actor_opt.zero_grad()
-            critic_opt.zero_grad()
-            for a_grad, param in zip(actor_grads, actor.parameters()):
-                param._grad = a_grad
-            for c_grad, param in zip(critic_grads, critic.parameters()):
-                param._grad = c_grad
-
-            actor_opt.step()
-            critic_opt.step()
-
+max_grad = 40
 
 if __name__ == "__main__":
     test_env = gym.make(env_name)
@@ -57,14 +34,6 @@ if __name__ == "__main__":
     shared_critic_opt = SharedAdam(global_critic.parameters(), lr=lr)
     shared_critic_opt.share_memory()
 
-    grad_updates_queue = mp.Queue()
-    lock = mp.Lock()
-
-    optimizer_worker = mp.Process(target=update_shared_model,
-                                  args=(grad_updates_queue, lock, shared_actor_opt,
-                                        shared_critic_opt, global_actor, global_critic))
-    optimizer_worker.start()
-
     workers = [Worker(id=i,
                       n_states=n_states,
                       n_actions=n_actions,
@@ -73,16 +42,15 @@ if __name__ == "__main__":
                       n_hiddens=n_hiddens,
                       global_actor=global_actor,
                       global_critic=global_critic,
-                      queue=grad_updates_queue,
+                      shared_actor_opt=shared_actor_opt,
+                      shared_critic_opt=shared_critic_opt,
                       gamma=gamma,
                       ent_coeff=ent_coeff,
-                      lock=lock) for i in range(n_workers)
+                      max_grad=max_grad) for i in range(n_workers)
                ]
-    processes = []
 
     for worker in workers:
         worker.start()
-        processes.append(worker)
 
-    for p in processes:
-        p.join()
+    for w in workers:
+        w.join()

@@ -1,4 +1,4 @@
-from model import Actor, Critic
+from NN.model import Actor, Critic
 import gym
 import numpy as np
 import torch
@@ -15,10 +15,11 @@ class Worker(torch.multiprocessing.Process):
                  n_hiddens,
                  global_actor,
                  global_critic,
-                 queue,
+                 shared_actor_opt,
+                 shared_critic_opt,
                  gamma,
                  ent_coeff,
-                 lock):
+                 max_grad):
         super(Worker, self).__init__()
         self.id = id
         self.n_states = n_states
@@ -27,19 +28,17 @@ class Worker(torch.multiprocessing.Process):
         self.n_hiddens = n_hiddens
         self.gamma = gamma
         self.ent_coeff = ent_coeff
+        self.max_grad = max_grad
         self.env_name = env_name
         self.env = gym.make(self.env_name)
 
         self.local_actor_model = Actor(self.n_states, self.n_actions, self.action_bounds, self.n_hiddens)
-        self.local_actor_opt = torch.optim.Adam(self.local_actor_model.parameters(), lr=0)
         self.local_critic_model = Critic(self.n_states)
-        self.local_critic_opt = torch.optim.Adam(self.local_critic_model.parameters(), lr=0)
 
         self.global_actor = global_actor
         self.global_critic = global_critic
-
-        self.queue = queue
-        self.lock = lock
+        self.shared_actor_opt = shared_actor_opt
+        self.shared_critic_opt = shared_critic_opt
 
         self.mse_loss = torch.nn.MSELoss()
         self.ep = 0
@@ -62,8 +61,14 @@ class Worker(torch.multiprocessing.Process):
 
     @staticmethod
     def sync_thread_spec_params(from_model, to_model):
-        for to_model, from_model in zip(to_model.parameters(), from_model.parameters()):
-            to_model.data.copy_(from_model.data)
+        to_model.load_state_dict(from_model.state_dict())
+
+    @staticmethod
+    def share_grads_to_global_models(local_model, global_model):
+        for local_param, global_param in zip(local_model.parameters(), global_model.parameters()):
+            if global_param.grad is not None:
+                return
+            global_param._grad = local_param.grad
 
     def run(self):
         print(f"Worker: {self.id} started.")
@@ -72,10 +77,11 @@ class Worker(torch.multiprocessing.Process):
         next_state = None
         episode_reward = 0
         while True:
-            with self.lock:
-                # Synchronize thread-specific parameters
-                self.sync_thread_spec_params(self.global_actor, self.local_actor_model)
-                self.sync_thread_spec_params(self.global_critic, self.local_critic_model)
+            self.shared_actor_opt.zero_grad()
+            self.shared_critic_opt.zero_grad()
+            # Synchronize thread-specific parameters
+            self.sync_thread_spec_params(self.global_actor, self.local_actor_model)
+            self.sync_thread_spec_params(self.global_critic, self.local_critic_model)
 
             states, actions, rewards, dones = [], [], [], []
 
@@ -125,13 +131,14 @@ class Worker(torch.multiprocessing.Process):
 
             actor_loss = pg_loss - self.ent_coeff * dist.entropy().mean()
 
-            self.local_actor_opt.zero_grad()
-            self.local_critic_opt.zero_grad()
-
             actor_loss.backward()
             value_loss.backward()
 
-            a_grads = [param.grad for param in self.local_actor_model.parameters()]
-            c_grads = [param.grad for param in self.local_critic_model.parameters()]
+            self.share_grads_to_global_models(self.local_actor_model, self.global_actor)
+            self.share_grads_to_global_models(self.local_critic_model, self.global_critic)
 
-            self.queue.put((a_grads, c_grads, self.id))
+            torch.nn.utils.clip_grad_norm_(self.local_actor_model.parameters(), self.max_grad)
+            torch.nn.utils.clip_grad_norm_(self.local_critic_model.parameters(), self.max_grad)
+
+            self.shared_actor_opt.step()
+            self.shared_critic_opt.step()

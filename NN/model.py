@@ -29,10 +29,9 @@ class Actor(nn.Module, ABC):
         x = inputs
         x = F.relu(self.hidden(x))
         mu = torch.tanh(self.mu(x))
-        sigma = F.softplus(self.sigma(x)) + 1e-4
+        sigma = F.softplus(self.sigma(x)) + 1e-6
 
         mu = mu * self.action_bounds[1]
-        # mu = torch.clamp(mu, self.action_bounds[0], self.action_bounds[1])
 
         return Normal(mu, sigma)
 
