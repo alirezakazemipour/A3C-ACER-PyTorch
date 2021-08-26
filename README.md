@@ -36,7 +36,6 @@ Running Episode Length| Running Episode Length
 
 
 ### Comparison
-
 > number of parallel agents = 2  
 >  x-axis corresponds episode number.
 
@@ -45,7 +44,6 @@ Running Episode Length| Running Episode Length
 - The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of 21 has been achieved X episodes vs. Y episode of the Recurrent A3C on the right.
 
 ## Table of Hyperparameters
-
 Parameter| Value
 :-----------------------:|:-----------------------:|
 lr			     | 1e-4
@@ -57,7 +55,7 @@ per agent replay memory size | 6e+5 / number of agents / rollout length
 c (used in truncated importance sampling)| 10
 &delta; (used in trust-region computation)| 1
 replay ratio| 4
-polyak average coefficients | 0.01 (1 - 0.99)
+polyak average coefficients | 0.01 ( = 1 - 0.99)
 critic loss coefficient| 0.5
 max grad norm| 40
 
@@ -104,12 +102,26 @@ python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200
 ```shell
 python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200 --train_from_scratch
 ```
+
+### Pre-Trained Weights
+- There are pre-trained weights of the agents that were shown in the [Results section](#Results) playing, if you want to test them by your self, please do the following:
+1. First extract your desired weight from `*tar.xz` format to get `.pth` extension then, rename your _env_name_ + _net_weights.pth_ file to _net_weights.pth_. For example: `Breakout_net_weights.pth` -> `net_weights.pth`
+2. Create a folder named _Models_  in the root directory of the project and **make sure it is empty**.
+3. Create an other folder with an arbitrary name inside _Models_ folder. For example:  
+```bash
+mkdir Models/ Models/temp_folder
+```
+4. Put your `net_weights.pth` file in your _temp_folder_.
+5. Run above commands without using `--do_tarin` flag:  
+```shell
+python3 main.py --env_name="PongNoFrameskip-v4"
+```
+
 ### Hardware Requirements
 - All runs with 8 parallel agents were carried out on [paperspace.com](https://www.paperspace.com/) [Free-GPU, 8 Cores, 30 GB RAM].
 - All runs with 8 parallel agents were carried out on [Google Colab](https://colab.research.google.com) [CPU Runtime, 2 Cores, 12 GB RAM].
 
 ## Tested Environments
-
 - [x] PongNoFrameskip-v4
 - [x] BreakoutNoFrameskip-v4
 - [x] SpaceInvadersNoFrameskip-v4
@@ -122,13 +134,11 @@ python3 main.py --do_train --env_name="PongNoFrameskip-v4" --interval=200 --trai
 ## Structure
 
 ## Reference
-
 1. [_Sample Efficient Actor-Critic with Experience Replay_, Wang et al., 2016](https://arxiv.org/abs/1611.01224)
 2.  [_Asynchronous Methods for Deep Reinforcement Learning_, Mnih et al., 2016](https://arxiv.org/abs/1602.01783)
 3.  [_OpenAI Baselines: ACKTR & A2C_](https://openai.com/blog/baselines-acktr-a2c/)
 
 ## Acknowledgement
-
 Current code was inspired by following implementation **especially the first one**:
 1. [acer](https://github.com/openai/baselines/tree/master/baselines/acer) by [@OpenAI](https://github.com/openai)
 2. [ACER](https://github.com/Kaixhin/ACER) by [@Kaixhin ](https://github.com/Kaixhin)
