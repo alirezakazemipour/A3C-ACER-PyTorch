@@ -19,7 +19,7 @@ Also, the ACER utilizes more advanced techniques like Truncated Importance Sampl
 
 **This repository contains the discrete implementation of the ACER [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch) and the A3C's [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/A3C_Atari)**.
 
->However, continuous implementations are also provided [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/ACER_Continuous) for the ACER and [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/A3C_Continuous) for A3C, they have not been tested yet and they will be added to the current work whenever they're suitably debugged and validated in the future.
+>Although, continuous implementations are also provided [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/ACER_Continuous) for the ACER and [here](https://github.com/alirezakazemipour/A3C-ACER-PyTorch/tree/A3C_Continuous) for A3C, they have not been tested yet and they will be added to the current work whenever they're suitably debugged and validated in the future.
 
 ## Results
 > number of parallel agents = 8.  
