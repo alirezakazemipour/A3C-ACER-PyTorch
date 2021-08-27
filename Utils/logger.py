@@ -7,36 +7,56 @@ import glob
 import psutil
 
 
+# region init_logger
 def init_logger(**config):
     config = config
     log_dir = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     if config["do_train"] and config["train_from_scratch"]:
-        create_wights_folder(log_dir)
+        create_folders(log_dir)
         _log_hyperparams(log_dir, **config)
     return log_dir
 
 
-def create_wights_folder(dir):
+# endregion
+
+
+# region create_wights_folder
+def create_folders(dir):
     if not os.path.exists("Models"):
         os.mkdir("Models")
-    os.mkdir("Models/" + dir)
+    if not os.path.exists("Logs"):
+        os.mkdir("Logs")
 
+    os.mkdir("Models/" + dir)
+    os.mkdir("Logs/" + dir)
+
+
+# endregion
 
 # region log hyperparameters
 def _log_hyperparams(dir, **config):
-    with SummaryWriter("Logs/" + dir) as writer:
+    write_to_json(config, log_dir=dir)
+    with SummaryWriter("Logs/" + dir + "/events" + "/") as writer:
         for k, v in config.items():
             writer.add_text(k, str(v))
-    # endregion
 
 
+# endregion
+
+# region exp_avg
 def exp_avg(x, y):
     return 0.99 * x + 0.01 * y
 
 
+# endregion
+
+# region to_gb
 def to_gb(in_bytes):
     return in_bytes / 1024 / 1024 / 1024
+
+
+# endregion
 
 
 def episodic_log(episode_stats, episode, reward, episode_len):
@@ -82,7 +102,7 @@ def training_log(iter_stats,
         save_params(episode_stats, iter_stats, id, config["log_dir"], g_model, opt)
 
     if id == 0:
-        with SummaryWriter("Logs/" + config["log_dir"]) as writer:
+        with SummaryWriter("Logs/" + config["log_dir"] + "/events" + "/") as writer:
             writer.add_scalar("Max Reward", episode_stats["max_reward"],
                               episode_stats["episode"])
             writer.add_scalar("Running Reward", episode_stats["running_reward"],
@@ -93,12 +113,13 @@ def training_log(iter_stats,
             writer.add_scalar("Running Value Loss", iter_stats["running_vloss"], iteration)
             writer.add_scalar("Running Grad Norm", iter_stats["running_grad_norm"], iteration)
 
-        write_to_json({"Max Reward": episode_stats["max_reward"],
-                       "Running Reward": episode_stats["running_reward"],
-                       "Episode length": episode_stats["episode_len"]
-                       },
-                      **config
-                      )
+        logs_to_write = {"Max Reward": episode_stats["max_reward"],
+                         "Running Reward": episode_stats["running_reward"],
+                         "Episode length": episode_stats["episode_len"]
+                         }
+
+        write_to_json(logs_to_write, **config)
+        write_to_csv(logs_to_write, **config)
 
         if iteration % config["interval"] == 0:
             ram = psutil.virtual_memory()
@@ -118,12 +139,40 @@ def training_log(iter_stats,
                           datetime.datetime.now().strftime("%H:%M:%S"),
                           )
                   )
+
+            del ram
+        del logs_to_write
     return iter_stats
 
 
 def write_to_json(keys_values, **config):
-    with open("Logs/" + config["log_dir"] + ".json", "a+") as f:
+    path = "Logs/" + config["log_dir"] + "/logs.json"
+    assert path.endswith(".json")
+
+    with open(path, "a+") as f:
         f.write(json.dumps(keys_values) + "\n")
+        f.flush()
+
+
+def write_to_csv(keys_values, **config):
+    path = "Logs/" + config["log_dir"] + "/logs.csv"
+    assert path.endswith(".csv")
+
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            for i, k in enumerate(keys_values.keys()):
+                if i > 0:
+                    f.write(",")
+                f.write(k)
+            f.write("\n")
+            f.flush()
+
+    with open(path, "a+") as f:
+        for i, v in enumerate(keys_values.values()):
+            if i > 0:
+                f.write(",")
+            f.write(str(v))
+        f.write("\n")
         f.flush()
 
 
@@ -155,4 +204,6 @@ def load_weights(**config):
 
     a = [(iter_stats[i]["np_rng_state"], iter_stats[i]["env_rng_state"]) for i in range(config["n_workers"])]
 
+    del checkpoints
+    del model_dir
     return checkpoint, episode_stats, iter_stats, a, log_dir

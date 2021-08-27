@@ -135,4 +135,5 @@ dmypy.json
 events.*
 *.json
 *.mp4
+*.csv
 Vid/
