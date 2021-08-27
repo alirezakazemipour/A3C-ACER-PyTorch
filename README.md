@@ -2,7 +2,7 @@
 
 # A3C-ACER-PyTorch
 
-This repository contains **PyTorch Implementation** of papers **Sample Efficient Actor-Critic with Experience Replay** (a.k.a **ACER**) and, **Asynchronous Methods for Deep Reinforcement Learning** (a.ka. **A3C**.)
+This repository contains **PyTorch Implementation** of papers **Sample Efficient Actor-Critic with Experience Replay** (a.k.a **ACER**) and, **Asynchronous Methods for Deep Reinforcement Learning** (a.k.a. **A3C**.)
 
 The A3C paper introduced some key ideas that can be summarized into:
 1. Asynchronous updates from multiple parallel agents to decorrelates the agent's data into a more stationary process rather than maintaining an Experience Replay Memory. Consequently, exceeding limits of off-policy methods and also, reducing memory computation per real interaction with the environment.
