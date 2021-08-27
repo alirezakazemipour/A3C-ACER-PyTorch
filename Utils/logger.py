@@ -1,4 +1,4 @@
-import numpy as np
+import json
 import datetime
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -93,6 +93,13 @@ def training_log(iter_stats,
             writer.add_scalar("Running Value Loss", iter_stats["running_vloss"], iteration)
             writer.add_scalar("Running Grad Norm", iter_stats["running_grad_norm"], iteration)
 
+        write_to_json({"Max Reward": episode_stats["max_reward"],
+                       "Running Reward": episode_stats["running_reward"],
+                       "Episode length": episode_stats["episode_len"]
+                       },
+                      **config
+                      )
+
         if iteration % config["interval"] == 0:
             ram = psutil.virtual_memory()
 
@@ -112,6 +119,12 @@ def training_log(iter_stats,
                           )
                   )
     return iter_stats
+
+
+def write_to_json(keys_values, **config):
+    with open("Logs/" + config["log_dir"] + ".json", "a+") as f:
+        f.write(json.dumps(keys_values) + "\n")
+        f.flush()
 
 
 def save_params(episode_stats, iter_stats, id, dir, g_model, opt):
