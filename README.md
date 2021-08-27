@@ -58,7 +58,7 @@ entropy coefficient | 64
 gamma	          | 0.99
 k (rollout length) | 20
 total memory size (Aggregation of all parallel agents' replay buffers)| 6e+5
-per agent replay memory size | 6e+5 / number of agents / rollout length
+per agent replay memory size | 6e+5 // (number of agents * rollout length)
 c (used in truncated importance sampling)| 10
 &delta; (used in trust-region computation)| 1
 replay ratio| 4
