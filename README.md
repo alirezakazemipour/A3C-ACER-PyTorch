@@ -48,7 +48,7 @@ Running Episode Length| Running Episode Length
 ![](Readme%20files/Plots/PongACER_ep_len.png)| ![](Readme%20files/Plots/PongRecurrentA3C_ep_len.png) 
 
 
-- The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of &cong; 21 has been achieved 600 episodes vs. 1.7k episodes of the Recurrent A3C on the right.
+- The Sample Efficiency promised by the ACER is obvious as it can be seen on the left plot that the score of &cong;21 has been achieved in 600 episodes vs. 1.7k episodes of the Recurrent A3C on the right.
 
 ## Table of Hyperparameters
 Parameter| Value
@@ -60,7 +60,7 @@ k (rollout length) | 20
 total memory size (Aggregation of all parallel agents' replay buffers)| 6e+5
 per agent replay memory size | 6e+5 // (number of agents * rollout length)
 c (used in truncated importance sampling)| 10
-&delta; (used in trust-region computation)| 1
+&delta; (delta used in trust-region computation)| 1
 replay ratio| 4
 polyak average coefficients | 0.01 ( = 1 - 0.99)
 critic loss coefficient| 0.5
