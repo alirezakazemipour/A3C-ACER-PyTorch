@@ -54,7 +54,7 @@ Running Episode Length| Running Episode Length
 Parameter| Value
 :-----------------------:|:-----------------------:|
 lr			     | 1e-4
-entropy coefficient | 64
+entropy coefficient | 0.001
 gamma	          | 0.99
 k (rollout length) | 20
 total memory size (Aggregation of all parallel agents' replay buffers)| 6e+5
