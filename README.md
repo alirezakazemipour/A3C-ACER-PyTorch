@@ -126,7 +126,7 @@ python3 main.py --env_name="PongNoFrameskip-v4"
 
 ### Hardware Requirements
 - All runs with 8 parallel agents were carried out on [paperspace.com](https://www.paperspace.com/) [Free-GPU, 8 Cores, 30 GB RAM].
-- All runs with 8 parallel agents were carried out on [Google Colab](https://colab.research.google.com) [CPU Runtime, 2 Cores, 12 GB RAM].
+- All runs with 2 parallel agents were carried out on [Google Colab](https://colab.research.google.com) [CPU Runtime, 2 Cores, 12 GB RAM].
 
 ## Tested Environments
 - [x] PongNoFrameskip-v4
